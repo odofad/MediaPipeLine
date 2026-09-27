@@ -45,7 +45,7 @@ The next `install.sh` keeps that copy-and-ask behaviour and adds:
 5. Warn when `REDline` is not on `PATH`. Do not fail the install for that.
 6. Do not add Jellyfin's repository, do not install the NVIDIA driver, and do not copy a library into `/usr/local`.
 
-That installer is not written yet.
+`install.sh` does those steps. A later install still does not overwrite a live conf.
 
 ## Review
 
@@ -57,5 +57,6 @@ Read on 2026-09-27 against the rules above.
 | `mediapipeline-camscan` | The same two tools, plus `/usr/bin/timeout` and `/usr/bin/iconv` when those files exist. A missing `REDline` writes `not found` and the report is still written. |
 | `mediapipeline-status` | `/usr/bin/systemctl` and `/usr/bin/nvidia-smi` when those files exist. No `nvidia-smi` does not fail the screen. |
 | `mediapipeline-camera-rules` | No external binary. It checks the rule file only. |
+| `install.sh` | Stops unless the machine is Ubuntu 26.04. Installs `ffmpeg` and `libimage-exiftool-perl`. Stops if `/usr/bin/ffprobe` or `/usr/bin/exiftool` does not start. Warns when `REDline` is missing and still exits 0. |
 
-`install.sh` is the old installer. Its gaps are the list in New installer. The unit file already starts `/usr/local/bin/mediapipeline-detect`, which is the right path for this project's own scripts.
+The unit file starts `/usr/local/bin/mediapipeline-detect`. That is the right path for this project's own scripts.

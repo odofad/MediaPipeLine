@@ -20,6 +20,40 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+os_id=""
+os_version=""
+if [[ ! -r /etc/os-release ]]; then
+  echo "This installer is for Ubuntu Server 26.04. /etc/os-release is missing." >&2
+  exit 1
+fi
+while IFS= read -r line || [[ -n "${line}" ]]; do
+  case "${line}" in
+    ID=*) os_id="${line#ID=}"; os_id="${os_id//\"/}" ;;
+    VERSION_ID=*) os_version="${line#VERSION_ID=}"; os_version="${os_version//\"/}" ;;
+  esac
+done < /etc/os-release
+if [[ "${os_id}" != "ubuntu" || "${os_version}" != "26.04" ]]; then
+  echo "This installer is for Ubuntu Server 26.04. This machine is ${os_id:-unknown} ${os_version:-unknown}." >&2
+  exit 1
+fi
+
+echo "installing ffmpeg and exiftool from Ubuntu"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y ffmpeg libimage-exiftool-perl
+if ! /usr/bin/ffprobe -version >/dev/null 2>&1; then
+  echo "/usr/bin/ffprobe did not start. A library in /usr/local/lib may be hiding the Ubuntu package." >&2
+  exit 1
+fi
+if ! /usr/bin/exiftool -ver >/dev/null 2>&1; then
+  echo "/usr/bin/exiftool did not start." >&2
+  exit 1
+fi
+echo "ffprobe and exiftool start"
+
+systemctl_bin=systemctl
+[[ -x /usr/bin/systemctl ]] && systemctl_bin=/usr/bin/systemctl
+
 mkdir -p "${STAMP_DIR}" "${PREFIX}" "${UNIT_DEST}" "${CONF_DIR}" /var/log/mediapipeline
 touch "${STAMP_BIN}" "${STAMP_UNIT}"
 
@@ -232,7 +266,7 @@ for name in "${old_units[@]}"; do
     [[ "${now}" == "${name}" ]] && keep=1 && break
   done
   if [[ "${keep}" -eq 0 && -f "${UNIT_DEST}/${name}" ]]; then
-    systemctl disable --now "${name}" >/dev/null 2>&1 || true
+    "$systemctl_bin" disable --now "${name}" >/dev/null 2>&1 || true
     rm -f "${UNIT_DEST}/${name}"
     echo "removed ${UNIT_DEST}/${name}"
     removed=1
@@ -242,10 +276,10 @@ done
 printf '%s\n' "${new_bins[@]}" > "${STAMP_BIN}"
 printf '%s\n' "${new_units[@]}" > "${STAMP_UNIT}"
 
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl daemon-reload
+if command -v "$systemctl_bin" >/dev/null 2>&1; then
+  "$systemctl_bin" daemon-reload
   if [[ "${enable_timer}" -eq 1 ]]; then
-    systemctl enable --now mediapipeline-detect.timer
+    "$systemctl_bin" enable --now mediapipeline-detect.timer
     echo "enabled mediapipeline-detect.timer"
   else
     echo "timer not enabled. An already enabled timer is left as it is."

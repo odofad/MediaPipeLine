@@ -2,9 +2,13 @@
 
 Newest first.
 
+## 2026-09-27 — installer
+
+`install.sh` now follows `notes/platform.md`. It stops unless the machine is Ubuntu 26.04. It installs `ffmpeg` and `libimage-exiftool-perl` from Ubuntu, then runs `/usr/bin/ffprobe -version` and `/usr/bin/exiftool -ver`. Either failure stops the install. A missing `REDline` is still only a warning. A live conf is still not overwritten.
+
 ## 2026-09-27 — platform
 
-`notes/platform.md` is the rule for binaries. Ubuntu Server 26.04 is the only target. A tool Ubuntu ships is run from `/usr/bin`, even when the conf names a different path. `REDline` is the exception, because Ubuntu does not ship it. Jellyfin is not an exception. The next installer is described there and is not written yet.
+`notes/platform.md` is the rule for binaries. Ubuntu Server 26.04 is the only target. A tool Ubuntu ships is run from `/usr/bin`, even when the conf names a different path. `REDline` is the exception, because Ubuntu does not ship it. Jellyfin is not an exception.
 
 Detection, camscan, and status now follow that rule. `ffmpeg`, `ffprobe`, and `exiftool` resolve to `/usr/bin` when the file is there. Camscan does the same for `timeout` and `iconv`. Status does the same for `systemctl` and `nvidia-smi`.
 
