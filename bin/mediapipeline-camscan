@@ -498,7 +498,7 @@ fill_colour_pairs() {
     err="$(mktemp)"
     rc="$(capture_split "$OPEN_TIMEOUT" "$raw" "$err" \
       env COLUMNS=240 "$mediainfo" --ParseSpeed=0 \
-      --Inform='Video;%Format%\t%BitDepth%\t%transfer_characteristics%\t%colour_primaries%\t%matrix_coefficients%\t%colour_range%\t%HDR_Format_Compatibility%\n' \
+      --Inform='Video;%Format%|%BitDepth%|%transfer_characteristics%|%colour_primaries%|%matrix_coefficients%|%colour_range%|%HDR_Format_Compatibility%\n' \
       "$f")"
     if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
       printf '%s\ttimed out\n' "$name" >>"$tally"
@@ -507,9 +507,8 @@ fill_colour_pairs() {
     else
       while IFS= read -r line || [[ -n "$line" ]]; do
         [[ -z "$line" ]] && continue
-        norm="$(printf '%s\n' "$line" | awk -F '\t' 'BEGIN { OFS="\t" } {
-          n = NF
-          if (n < 7) n = 7
+        norm="$(printf '%s\n' "$line" | awk -F '|' 'BEGIN { OFS="\t" } {
+          n = 7
           for (i = 1; i <= n; i++) if ($i == "") $i = "-"
           out = $1
           for (i = 2; i <= n; i++) out = out OFS $i
