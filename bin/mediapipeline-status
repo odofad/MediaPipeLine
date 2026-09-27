@@ -10,6 +10,10 @@ ENCODE_LOG=/var/log/mediapipeline/encode.log
 DETECT_UNIT=mediapipeline-detect.service
 TIMER_UNIT=mediapipeline-detect.timer
 ENCODE_UNIT=mediapipeline-encode.service
+systemctl_bin=systemctl
+[[ -x /usr/bin/systemctl ]] && systemctl_bin=/usr/bin/systemctl
+nvidia_smi_bin=nvidia-smi
+[[ -x /usr/bin/nvidia-smi ]] && nvidia_smi_bin=/usr/bin/nvidia-smi
 
 logged=""
 relog=""
@@ -93,8 +97,8 @@ newest_shoot() {
 
 unit_field() {
   local unit="$1" prop="$2" line
-  command -v systemctl >/dev/null 2>&1 || return 0
-  line="$(systemctl show "$unit" -p "$prop" --no-pager 2>/dev/null || true)"
+  command -v "$systemctl_bin" >/dev/null 2>&1 || return 0
+  line="$("$systemctl_bin" show "$unit" -p "$prop" --no-pager 2>/dev/null || true)"
   printf '%s' "${line#*=}"
 }
 
@@ -125,7 +129,7 @@ pass_state() {
 
 timer_line() {
   local enabled active next last
-  if ! command -v systemctl >/dev/null 2>&1; then
+  if ! command -v "$systemctl_bin" >/dev/null 2>&1; then
     printf 'systemctl not found'
     return
   fi
@@ -207,11 +211,11 @@ folder_line() {
 
 gpu_lines() {
   local line
-  if ! command -v nvidia-smi >/dev/null 2>&1; then
+  if ! command -v "$nvidia_smi_bin" >/dev/null 2>&1; then
     echo "  no nvidia-smi"
     return
   fi
-  if ! line="$(nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null)"; then
+  if ! line="$("$nvidia_smi_bin" --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null)"; then
     echo "  nvidia-smi failed"
     return
   fi
@@ -229,11 +233,11 @@ gpu_lines() {
 
 encoder_state() {
   local active
-  if ! command -v systemctl >/dev/null 2>&1; then
+  if ! command -v "$systemctl_bin" >/dev/null 2>&1; then
     printf 'systemctl not found'
     return
   fi
-  if ! systemctl cat "$ENCODE_UNIT" >/dev/null 2>&1; then
+  if ! "$systemctl_bin" cat "$ENCODE_UNIT" >/dev/null 2>&1; then
     printf 'not installed'
     return
   fi

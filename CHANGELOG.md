@@ -2,6 +2,20 @@
 
 Newest first.
 
+## 2026-09-27 — platform
+
+`notes/platform.md` is the rule for binaries. Ubuntu Server 26.04 is the only target. A tool Ubuntu ships is run from `/usr/bin`, even when the conf names a different path. `REDline` is the exception, because Ubuntu does not ship it. Jellyfin is not an exception. The next installer is described there and is not written yet.
+
+Detection, camscan, and status now follow that rule. `ffmpeg`, `ffprobe`, and `exiftool` resolve to `/usr/bin` when the file is there. Camscan does the same for `timeout` and `iconv`. Status does the same for `systemctl` and `nvidia-smi`.
+
+## 2026-09-27 — system ffmpeg
+
+The shipped `ffmpeg` line is the name `ffmpeg`, not `/usr/lib/jellyfin-ffmpeg/ffmpeg`. Ubuntu 26.04 installs that binary from the `ffmpeg` package in universe (8.0.1). Jellyfin's build is not in Ubuntu. It comes from Jellyfin's own apt repository and is installed beside the system binary. A live conf is not overwritten by `install.sh`, so a machine that already points at Jellyfin keeps that line until it is edited.
+
+## 2026-09-27 — REDline optional
+
+`install.sh` does not install REDline. When the binary named by `redline` is not on `PATH`, the install finishes and prints a warning. Detection and camscan no longer refuse to start because that conf key is empty. An empty key means `REDline`. A `.r3d` with no binary is still gamma `unknown` and that shoot goes to Error. The pass continues, and every other camera is read.
+
 ## 2026-09-27 — camscan read
 
 The first sixteen reports had an empty ffprobe section on every file, including a 5 MB phone clip. ExifTool `-ee` was run on the whole clip and timed out on the large MP4s. A 936 byte file was treated as media. No camera rule is added.

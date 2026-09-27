@@ -27,6 +27,21 @@ trim() {
   printf '%s' "$s"
 }
 
+# Ubuntu ships these. A conf path must not hide /usr/bin.
+system_bin() {
+  local name="$1" base
+  base="${name##*/}"
+  case "$base" in
+    ffmpeg|ffprobe|exiftool)
+      if [[ -x "/usr/bin/${base}" ]]; then
+        printf '/usr/bin/%s' "$base"
+        return 0
+      fi
+      ;;
+  esac
+  printf '%s' "$name"
+}
+
 load_conf() {
   local line key val
   [[ -f "$CONF" ]] || { echo "missing config: $CONF" >&2; exit 1; }
@@ -56,9 +71,12 @@ load_conf() {
     esac
   done < "$CONF"
   local need
-  for need in logged relog error settle_seconds lock_file card_suffix media_extensions sidecar_extensions ffprobe exiftool redline; do
+  for need in logged relog error settle_seconds lock_file card_suffix media_extensions sidecar_extensions ffprobe exiftool; do
     [[ -n "${!need}" ]] || { log_error "config missing $need"; echo "config missing $need" >&2; exit 1; }
   done
+  [[ -n "$redline" ]] || redline="REDline"
+  ffprobe="$(system_bin "$ffprobe")"
+  exiftool="$(system_bin "$exiftool")"
   [[ "$settle_seconds" =~ ^[0-9]+$ ]] || { log_error "settle_seconds is not a number"; echo "settle_seconds is not a number" >&2; exit 1; }
 }
 

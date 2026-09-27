@@ -97,7 +97,7 @@ The verbs:
 | `error <folder>` | The shoot was moved to `2.3.Error`. |
 | `error-refused <folder>` | A folder of that name was already in `2.3.Error`. |
 | `error-failed <folder>` | The move failed. |
-| `redline-missing <folder> <clip>` | The file is `.r3d` and `redline` was not found. |
+| `redline-missing <folder> <clip>` | The file is `.r3d` and `redline` was not found. The pass continues. |
 | `conf-write-failed <gamma.word> <folder>` | The new treatment line could not be appended. |
 | `config missing <key>` | A required `pipe.conf` key is empty. |
 | `settle_seconds is not a number` | `settle_seconds` is not digits. |
@@ -125,7 +125,7 @@ Then sections, in this order. A section is a line `[name]`, then lines, then a b
 | `xml-utf16le` | The same slice read as UTF-16LE, including a one-byte shift. |
 | `xml-utf16be` | The same slice read as UTF-16BE, including a one-byte shift. |
 | `sidecar` | A same-name sidecar beside the file or in `CLIP/`, read in full. If the stem does not match and the mag has one sidecar, that file is read and the section has `note: only sidecar in the mag, stem does not match`. If it has more than one, the section has `note: N sidecars, not guessing` and one `file:` line per name. None of those files is opened. |
-| `redline` | `REDline --printMeta` when the file is `.r3d`. Otherwise `not r3d`. |
+| `redline` | `REDline --printMeta` when the file is `.r3d`. Otherwise `not r3d`. A missing binary is `not found`. The report is still written. |
 
 `failed <status>` means the tool exited with no text. The next line is the first line it wrote to stderr. `timed out` means the tool was stopped. Partial lines above it are kept. `not found` means the tool was not on `PATH`.
 

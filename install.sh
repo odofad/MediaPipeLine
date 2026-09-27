@@ -257,3 +257,8 @@ else
 fi
 echo "Tunables live in ${CONF_DIR}/pipe.conf. A later install asks again and rewrites only the folder paths, the run user, and the timer switch."
 echo "Status screen: ${PREFIX}/mediapipeline-status"
+redline_bin="$(conf_get redline || true)"
+[[ -n "${redline_bin}" ]] || redline_bin="REDline"
+if ! command -v "${redline_bin}" >/dev/null 2>&1; then
+  echo "warning: ${redline_bin} is not on PATH. RED is optional. Install REDline by hand on a machine that logs .r3d. Other cameras do not need it. A .r3d without it is gamma unknown."
+fi

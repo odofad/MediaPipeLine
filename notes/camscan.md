@@ -42,7 +42,7 @@ The middle of the file is not read. A grep of a whole MXF is what hung the hand 
 | `xml-utf16le` | Those same two slices, decoded as UTF-16LE, including a one-byte shift. Sony MXF often stores the XML this way, which is why a plain grep misses it. |
 | `xml-utf16be` | The same slices as UTF-16BE. |
 | `sidecar` | A same-name sidecar beside the clip or in `CLIP/`, read in full. If there is no same-name file and the mag has exactly one sidecar, that file is read and the section says the stem does not match. If it has more than one, the names are listed and none is opened. Sidecars are small. The clip is not. |
-| `redline` | `REDline --printMeta` when the file ends in `.r3d`. Otherwise the section says `not r3d`. |
+| `redline` | `REDline --printMeta` when the file ends in `.r3d`. Otherwise the section says `not r3d`. The binary is optional. A missing one writes `not found` and the report is still written. |
 
 `none` means that test ran and found nothing. It is not the card word `unknown`. `failed` and a status means the tool exited with no text. The next line is its first error line. `timed out` means the tool was stopped. Lines above it are kept. `not found` means that tool is not on `PATH`.
 

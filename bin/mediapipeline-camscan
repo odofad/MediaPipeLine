@@ -28,6 +28,26 @@ trim() {
   printf '%s' "$s"
 }
 
+# Ubuntu ships these. A conf path must not hide /usr/bin.
+system_bin() {
+  local name="$1" base
+  base="${name##*/}"
+  case "$base" in
+    ffmpeg|ffprobe|exiftool)
+      if [[ -x "/usr/bin/${base}" ]]; then
+        printf '/usr/bin/%s' "$base"
+        return 0
+      fi
+      ;;
+  esac
+  printf '%s' "$name"
+}
+
+timeout_bin=timeout
+[[ -x /usr/bin/timeout ]] && timeout_bin=/usr/bin/timeout
+iconv_bin=iconv
+[[ -x /usr/bin/iconv ]] && iconv_bin=/usr/bin/iconv
+
 load_conf() {
   local line key val
   [[ -f "$CONF" ]] || { echo "missing config: $CONF" >&2; exit 1; }
@@ -52,9 +72,12 @@ load_conf() {
     esac
   done < "$CONF"
   local need
-  for need in media_extensions sidecar_extensions ffprobe exiftool redline; do
+  for need in media_extensions sidecar_extensions ffprobe exiftool; do
     [[ -n "${!need}" ]] || { echo "config missing $need" >&2; exit 1; }
   done
+  [[ -n "$redline" ]] || redline="REDline"
+  ffprobe="$(system_bin "$ffprobe")"
+  exiftool="$(system_bin "$exiftool")"
   if [[ -z "$camscan_slice" ]]; then
     camscan_slice=$SLICE_DEFAULT
     slice_defaulted=1
@@ -92,8 +115,8 @@ capture() {
   shift 2
   local rc=0
   : >"$dest"
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=TERM "$secs" "$@" >"$dest" 2>/dev/null || rc=$?
+  if command -v "$timeout_bin" >/dev/null 2>&1; then
+    "$timeout_bin" --signal=TERM "$secs" "$@" >"$dest" 2>/dev/null || rc=$?
   else
     "$@" >"$dest" 2>/dev/null || rc=$?
   fi
@@ -116,8 +139,8 @@ capture_split() {
   : >"$dest"
   : >"$errf"
   errtmp="$(mktemp)"
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=TERM "$secs" "$@" >"$dest" 2>"$errtmp" || rc=$?
+  if command -v "$timeout_bin" >/dev/null 2>&1; then
+    "$timeout_bin" --signal=TERM "$secs" "$@" >"$dest" 2>"$errtmp" || rc=$?
   else
     "$@" >"$dest" 2>"$errtmp" || rc=$?
   fi
@@ -193,13 +216,13 @@ xml_body() {
 utf16_media() {
   local file="$1" enc="$2" dest="$3" part shifted bytes
   : >"$dest"
-  command -v iconv >/dev/null 2>&1 || return 1
+  command -v "$iconv_bin" >/dev/null 2>&1 || return 1
   part="$(mktemp)"
   shifted="$(mktemp)"
   decode_part() {
-    iconv -f "$enc" -t UTF-8 -c "$part" >>"$dest" 2>/dev/null || true
+    "$iconv_bin" -f "$enc" -t UTF-8 -c "$part" >>"$dest" 2>/dev/null || true
     tail -c +2 "$part" >"$shifted" 2>/dev/null || true
-    iconv -f "$enc" -t UTF-8 -c "$shifted" >>"$dest" 2>/dev/null || true
+    "$iconv_bin" -f "$enc" -t UTF-8 -c "$shifted" >>"$dest" 2>/dev/null || true
   }
   head -c "$camscan_slice" "$file" >"$part"
   decode_part
@@ -232,7 +255,7 @@ file_opens() {
     return 0
   fi
   if command -v "$ffprobe" >/dev/null 2>&1; then
-    out="$(timeout "$OPEN_TIMEOUT" "$ffprobe" -v error -show_format \
+    out="$("$timeout_bin" "$OPEN_TIMEOUT" "$ffprobe" -v error -show_format \
       -show_entries format=format_name -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null || true)"
     if [[ -n "$(trim "$out")" ]]; then
       open_how="ffprobe"
@@ -240,7 +263,7 @@ file_opens() {
     fi
   fi
   if command -v "$exiftool" >/dev/null 2>&1; then
-    out="$(timeout "$OPEN_TIMEOUT" "$exiftool" -s3 -FileType "$f" 2>/dev/null || true)"
+    out="$("$timeout_bin" "$OPEN_TIMEOUT" "$exiftool" -s3 -FileType "$f" 2>/dev/null || true)"
     if [[ -n "$(trim "$out")" ]]; then
       open_how="exiftool"
       return 0
@@ -451,8 +474,8 @@ exif_embedded_one() {
   err="$(mktemp)"
   : >"$dest"
   rc=0
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=TERM "$camscan_timeout" \
+  if command -v "$timeout_bin" >/dev/null 2>&1; then
+    "$timeout_bin" --signal=TERM "$camscan_timeout" \
       "$exiftool" -fast -m -a -s -G1 -ee "$slice" >"$raw" 2>"$err" || rc=$?
   else
     "$exiftool" -fast -m -a -s -G1 -ee "$slice" >"$raw" 2>"$err" || rc=$?

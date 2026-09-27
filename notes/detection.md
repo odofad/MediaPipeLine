@@ -78,7 +78,7 @@ A Sony make is `CaptureGammaEquation` present, or a make/model string `ILME-…`
 
 For Sony and Panasonic, `ffprobe` from the conf fills width, height, frame rate, duration, codec, audio codec, channel count, and timecode. It is not asked for colour.
 
-For RED, those fields come from the `printMeta` text already captured. The binary is `redline` from the conf. `ffprobe` is not run on an `.r3d`. A non-zero REDline exit is ignored when the gamma line is in the output. No gamma line means gamma and gamut `unknown`. There is no second RED detector. The `.RMD` is not opened by this script. REDline reads it with the `_001`.
+For RED, those fields come from the `printMeta` text already captured. The binary is `redline` from the conf. An empty key means `REDline` on `PATH`. `ffprobe` is not run on an `.r3d`. A missing binary logs `redline-missing` and does not stop the pass. A non-zero REDline exit is ignored when the gamma line is in the output. No gamma line means gamma and gamut `unknown`, and that folder goes to Error with any other unresolved shoot. There is no second RED detector. The `.RMD` is not opened by this script. REDline reads it with the `_001`.
 
 `range` is `unknown` on every block. No range probe has been decided.
 

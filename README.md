@@ -10,7 +10,7 @@ The master copy is this tree. `install.sh` puts the scripts into the system loca
 
 Detection runs on a timer. One pass writes a mag card and stops. A folder name that is not a real date goes to Relog. Unknown colour goes to Error. A shoot whose colour is resolved stays in Logged. Nothing is moved to Convert, and nothing is encoded.
 
-The cameras detection can already read are RED, Panasonic, and the Sony bodies that write `CaptureGammaEquation`. `camera-rules.conf` is version 1 of that list. It says where a camera writes its word. It does not say what the encoder does with it. Detection does not read the file yet. The readers in the script are still what runs. `mediapipeline-camera-rules` only checks the grammar.
+The cameras detection can already read are RED, Panasonic, and the Sony bodies that write `CaptureGammaEquation`. REDline is not part of the install. The install warns when it is missing. A machine without it still reads every other camera. A RED clip on that machine has no gamma word and goes to Error. `camera-rules.conf` is version 1 of that list. It says where a camera writes its word. It does not say what the encoder does with it. Detection does not read the file yet. The readers in the script are still what runs. `mediapipeline-camera-rules` only checks the grammar.
 
 `mediapipeline-status` reports the logging pass and the encoder. The encoder is not installed.
 
@@ -31,6 +31,7 @@ MediaPipeLine/
   bin/                the scripts
   systemd/            the detection timer
   notes/              the plan for each script
+  notes/platform.md   Ubuntu 26.04, system binaries, and the installer plan
   CHANGELOG.md        what changed, newest first
 ```
 
