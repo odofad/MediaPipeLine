@@ -1,0 +1,524 @@
+#!/bin/bash
+# Probe the first openable media file in a mag. Write ~/camscan/<mag>.txt.
+# Does not move folders. Does not write a mag card. Does not read the middle of a file.
+set -euo pipefail
+
+CONF=/etc/mediapipeline/pipe.conf
+SLICE_DEFAULT=8388608
+TIMEOUT_DEFAULT=25
+OPEN_TIMEOUT=15
+MAX_TRIES=8
+
+media_extensions=""
+sidecar_extensions=""
+ffprobe=""
+exiftool=""
+redline=""
+error=""
+camscan_slice=""
+camscan_timeout=""
+slice_defaulted=0
+timeout_defaulted=0
+
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+load_conf() {
+  local line key val
+  [[ -f "$CONF" ]] || { echo "missing config: $CONF" >&2; exit 1; }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || continue
+    key="$(trim "${line%%=*}")"
+    val="$(trim "${line#*=}")"
+    if [[ "$val" == \"*\" && "$val" == *\" ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+    case "$key" in
+      media_extensions) media_extensions=$val ;;
+      sidecar_extensions) sidecar_extensions=$val ;;
+      ffprobe) ffprobe=$val ;;
+      exiftool) exiftool=$val ;;
+      redline) redline=$val ;;
+      error) error=$val ;;
+      camscan_slice) camscan_slice=$val ;;
+      camscan_timeout) camscan_timeout=$val ;;
+    esac
+  done < "$CONF"
+  local need
+  for need in media_extensions sidecar_extensions ffprobe exiftool redline; do
+    [[ -n "${!need}" ]] || { echo "config missing $need" >&2; exit 1; }
+  done
+  if [[ -z "$camscan_slice" ]]; then
+    camscan_slice=$SLICE_DEFAULT
+    slice_defaulted=1
+  fi
+  if [[ -z "$camscan_timeout" ]]; then
+    camscan_timeout=$TIMEOUT_DEFAULT
+    timeout_defaulted=1
+  fi
+  [[ "$camscan_slice" =~ ^[0-9]+$ && "$camscan_slice" -gt 0 ]] || { echo "camscan_slice is not a number" >&2; exit 1; }
+  [[ "$camscan_timeout" =~ ^[0-9]+$ && "$camscan_timeout" -gt 0 ]] || { echo "camscan_timeout is not a number" >&2; exit 1; }
+}
+
+has_ext() {
+  local name="${1,,}" list="$2" ext
+  for ext in $list; do
+    [[ "$name" == *"$ext" ]] && return 0
+  done
+  return 1
+}
+
+has_media() {
+  local dir="$1" f
+  for f in "$dir"/*; do
+    [[ -f "$f" ]] || continue
+    has_ext "$f" "$media_extensions" && return 0
+  done
+  return 1
+}
+
+# Run a command into a file. Print 124 or 137 when it is stopped, else 0 when
+# the file has text, else the command's status. A stopped command may still
+# have written a partial file.
+capture() {
+  local secs="$1" dest="$2"
+  shift 2
+  local rc=0
+  : >"$dest"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM "$secs" "$@" >"$dest" 2>/dev/null || rc=$?
+  else
+    "$@" >"$dest" 2>/dev/null || rc=$?
+  fi
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+    printf '%s' "$rc"
+    return 0
+  fi
+  if [[ -s "$dest" ]]; then
+    printf '0'
+    return 0
+  fi
+  printf '%s' "$rc"
+}
+
+mark_timeout() {
+  local rc="$1" dest="$2" tmp
+  [[ "$rc" -eq 124 || "$rc" -eq 137 ]] || return 0
+  tmp="$(mktemp)"
+  printf 'timed out\n' >"$tmp"
+  if [[ -s "$dest" ]]; then
+    cat "$dest" >>"$tmp"
+  fi
+  cat "$tmp" >"$dest"
+  rm -f "$tmp"
+}
+
+xml_chunk() {
+  local src="$1" label="$2" pattern="$3" cap="$4" hits
+  hits="$(grep -a -o -E "$pattern" "$src" 2>/dev/null | head -n "$cap" || true)"
+  [[ -n "$hits" ]] || return 0
+  printf '%s\n%s\n' "$label" "$hits"
+}
+
+xml_body() {
+  local src="$1" names
+  [[ -s "$src" ]] || return 0
+  xml_chunk "$src" "panasonic:" '<(Manufacturer|ModelName|CaptureGamma|CaptureGamut)>[^<]+' 20
+  xml_chunk "$src" "device:" '<(DeviceManufacturer|DeviceModelName|DeviceSerialNo)>[^<]+' 20
+  xml_chunk "$src" "sony name-value:" 'Item name="[^"]+" value="[^"]+"' 40
+  xml_chunk "$src" "sony value-name:" 'Item value="[^"]+" name="[^"]+"' 40
+  names="$(grep -a -o -E 'Item name="[^"]+"' "$src" 2>/dev/null | sort -u | head -n 40 || true)"
+  [[ -n "$names" ]] && printf 'item names:\n%s\n' "$names"
+}
+
+utf16_media() {
+  local file="$1" enc="$2" dest="$3" part shifted bytes
+  : >"$dest"
+  command -v iconv >/dev/null 2>&1 || return 1
+  part="$(mktemp)"
+  shifted="$(mktemp)"
+  decode_part() {
+    iconv -f "$enc" -t UTF-8 -c "$part" >>"$dest" 2>/dev/null || true
+    tail -c +2 "$part" >"$shifted" 2>/dev/null || true
+    iconv -f "$enc" -t UTF-8 -c "$shifted" >>"$dest" 2>/dev/null || true
+  }
+  head -c "$camscan_slice" "$file" >"$part"
+  decode_part
+  bytes="$(stat -c '%s' "$file")"
+  if [[ "$bytes" -gt "$camscan_slice" ]]; then
+    tail -c "$camscan_slice" "$file" >"$part"
+    decode_part
+  fi
+  rm -f "$part" "$shifted"
+  return 0
+}
+
+write_section_file() {
+  local title="$1" src="$2"
+  printf '[%s]\n' "$title" >>"$report"
+  if [[ ! -s "$src" ]]; then
+    printf 'none\n\n' >>"$report"
+  else
+    cat "$src" >>"$report"
+    printf '\n' >>"$report"
+  fi
+}
+
+file_opens() {
+  local f="$1" lower out
+  open_how=""
+  lower="${f,,}"
+  if [[ "$lower" == *.r3d && -s "$f" ]]; then
+    open_how="r3d"
+    return 0
+  fi
+  if command -v "$ffprobe" >/dev/null 2>&1; then
+    out="$(timeout "$OPEN_TIMEOUT" "$ffprobe" -v error -show_entries format=format_name -of default=nw=1:nk=1 "$f" 2>/dev/null || true)"
+    if [[ -n "$(trim "$out")" ]]; then
+      open_how="ffprobe"
+      return 0
+    fi
+  fi
+  if command -v "$exiftool" >/dev/null 2>&1; then
+    out="$(timeout "$OPEN_TIMEOUT" "$exiftool" -s3 -FileType "$f" 2>/dev/null || true)"
+    if [[ -n "$(trim "$out")" ]]; then
+      open_how="exiftool"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+pick_file() {
+  local mag="$1" f name tries=0
+  local -a names=()
+  chosen=""
+  open_how=""
+  stop_reason=""
+  skipped=()
+  for f in "$mag"/*; do
+    [[ -f "$f" ]] || continue
+    has_ext "$f" "$media_extensions" || continue
+    names+=("$f")
+  done
+  [[ ${#names[@]} -gt 0 ]] || return 1
+  local sorted
+  sorted="$(mktemp)"
+  printf '%s\n' "${names[@]}" | sort >"$sorted"
+  mapfile -t names <"$sorted"
+  rm -f "$sorted"
+  for f in "${names[@]}"; do
+    name="${f##*/}"
+    tries=$((tries + 1))
+    if [[ "$tries" -gt "$MAX_TRIES" ]]; then
+      stop_reason="stopped after ${MAX_TRIES} files"
+      return 1
+    fi
+    if [[ ! -s "$f" ]]; then
+      skipped+=("$name empty")
+      continue
+    fi
+    if file_opens "$f"; then
+      chosen="$f"
+      return 0
+    fi
+    skipped+=("$name unreadable")
+  done
+  return 1
+}
+
+find_sidecar() {
+  local file="$1" mag="$2"
+  local stem stemlower place cand base lower ext
+  stem="${file##*/}"
+  stem="${stem%.*}"
+  stemlower="${stem,,}"
+  for place in "${file%/*}" "$mag/CLIP"; do
+    [[ -d "$place" ]] || continue
+    for cand in "$place"/*; do
+      [[ -f "$cand" ]] || continue
+      base="${cand##*/}"
+      lower="${base,,}"
+      for ext in $sidecar_extensions; do
+        if [[ "$lower" == "${stemlower}${ext}" ]]; then
+          printf '%s' "$cand"
+          return 0
+        fi
+      done
+    done
+  done
+  return 1
+}
+
+fill_ffprobe() {
+  local file="$1" streams="$2" tags="$3" raw rc filtered
+  raw="$(mktemp)"
+  : >"$streams"
+  : >"$tags"
+  if ! command -v "$ffprobe" >/dev/null 2>&1; then
+    printf 'not found\n' >"$streams"
+    rm -f "$raw"
+    return 0
+  fi
+  rc="$(capture "$OPEN_TIMEOUT" "$raw" "$ffprobe" -v error -hide_banner \
+    -show_entries stream=codec_type,codec_name,width,height,avg_frame_rate,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,channels \
+    -show_entries format=format_name,duration,size \
+    -of default=noprint_wrappers=1 "$file")"
+  mark_timeout "$rc" "$raw"
+  if [[ -s "$raw" ]]; then
+    cat "$raw" >"$streams"
+  fi
+  rc="$(capture "$OPEN_TIMEOUT" "$raw" "$ffprobe" -v error -hide_banner \
+    -show_entries format_tags -of default=noprint_wrappers=1 "$file")"
+  mark_timeout "$rc" "$raw"
+  filtered="$(grep -iE 'make|model|manufacturer|comment|encoder|creation|com\.apple|dji|insta|sony|panasonic|gamma|gamut|color|handler|software|device' "$raw" || true)"
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+    printf 'timed out\n' >"$tags"
+  fi
+  if [[ -n "$filtered" ]]; then
+    printf '%s\n' "$filtered" >>"$tags"
+  fi
+  rm -f "$raw"
+}
+
+fill_exif_header() {
+  local file="$1" dest="$2" raw rc
+  raw="$(mktemp)"
+  : >"$dest"
+  if ! command -v "$exiftool" >/dev/null 2>&1; then
+    printf 'not found\n' >"$dest"
+    rm -f "$raw"
+    return 0
+  fi
+  rc="$(capture "$OPEN_TIMEOUT" "$raw" "$exiftool" -s \
+    -Make -Model -CameraModelName -DeviceManufacturer -DeviceModelName -DeviceSerialNo \
+    -CaptureGammaEquation -CaptureColorPrimaries -CaptureGamma -CaptureGamut \
+    -Gamma -ColorSpace -ColorPrimaries -PictureProfile -GammaType "$file")"
+  mark_timeout "$rc" "$raw"
+  [[ -s "$raw" ]] && cat "$raw" >"$dest"
+  rm -f "$raw"
+}
+
+fill_exif_embedded() {
+  local file="$1" dest="$2" raw rc wide
+  raw="$(mktemp)"
+  : >"$dest"
+  if ! command -v "$exiftool" >/dev/null 2>&1; then
+    printf 'not found\n' >"$dest"
+    rm -f "$raw"
+    return 0
+  fi
+  rc=0
+  # head closes the pipe after 2000 lines so a chatty file cannot fill the disk.
+  timeout --signal=TERM "$camscan_timeout" \
+    bash -c '"$1" -a -s -G1 -ee "$2" 2>/dev/null | head -n 2000' _ "$exiftool" "$file" >"$raw" || rc=$?
+  wide="$(grep -iE 'gamma|gamut|color|primar|picture|profile|device|make|model|manufacturer' "$raw" 2>/dev/null | head -n 80 || true)"
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+    printf 'timed out\n' >"$dest"
+  fi
+  if [[ -n "$wide" ]]; then
+    printf '%s\n' "$wide" >>"$dest"
+  fi
+  rm -f "$raw"
+}
+
+fill_redline() {
+  local file="$1" dest="$2" raw rc lower
+  raw="$(mktemp)"
+  : >"$dest"
+  lower="${file,,}"
+  if [[ "$lower" != *.r3d ]]; then
+    printf 'not r3d\n' >"$dest"
+    rm -f "$raw"
+    return 0
+  fi
+  if ! command -v "$redline" >/dev/null 2>&1; then
+    printf 'not found\n' >"$dest"
+    rm -f "$raw"
+    return 0
+  fi
+  rc="$(capture "$camscan_timeout" "$raw" "$redline" --i "$file" --printMeta 1)"
+  mark_timeout "$rc" "$raw"
+  if [[ -s "$raw" ]]; then
+    head -n 120 "$raw" >"$dest"
+  fi
+  rm -f "$raw"
+}
+
+scan_mag() {
+  local mag="$1" mag_abs mag_name file side body slice u16 bytes
+  local streams tags header embedded red side_body
+  local -a skipped=()
+  mag_abs="$(cd "$mag" && pwd)"
+  mag_name="$(basename "$mag_abs")"
+  if [[ "$mag_abs" == "/" || "$mag_abs" == "$HOME" ]]; then
+    echo "refusing $mag_abs" >&2
+    return 1
+  fi
+  report="${out_dir}/${mag_name}.txt"
+  echo "$mag_name"
+  if ! pick_file "$mag_abs"; then
+    {
+      printf '%s\n' "# camscan report. Not a mag card. Detection does not read this file."
+      printf 'mag: %s\n' "$mag_name"
+      printf 'path: %s\n' "$mag_abs"
+      printf 'file: none\n'
+      if [[ -n "$stop_reason" ]]; then
+        printf 'note: %s\n' "$stop_reason"
+      else
+        printf 'note: no openable media file\n'
+      fi
+      local s
+      for s in "${skipped[@]}"; do
+        printf 'skipped: %s\n' "$s"
+      done
+    } >"$report"
+    echo "  wrote $report"
+    return 0
+  fi
+  file="$chosen"
+  echo "  ${file##*/}"
+  bytes="$(stat -c '%s' "$file")"
+  slice="$(mktemp)"
+  head -c "$camscan_slice" "$file" >"$slice"
+  if [[ "$bytes" -gt "$camscan_slice" ]]; then
+    tail -c "$camscan_slice" "$file" >>"$slice"
+  fi
+
+  {
+    printf '%s\n' "# camscan report. Not a mag card. Detection does not read this file."
+    printf '%s\n' "# ffprobe colour tags in this file are not a camera word."
+    printf 'mag: %s\n' "$mag_name"
+    printf 'path: %s\n' "$mag_abs"
+    printf 'file: %s\n' "${file##*/}"
+    printf 'opened: %s\n' "$open_how"
+    printf 'bytes: %s\n' "$bytes"
+    printf 'slice: %s\n' "$camscan_slice"
+    printf 'scanned: %s\n' "$(date -Iseconds)"
+    local s
+    for s in "${skipped[@]}"; do
+      printf 'skipped: %s\n' "$s"
+    done
+    printf '\n'
+  } >"$report"
+
+  streams="$(mktemp)"
+  tags="$(mktemp)"
+  header="$(mktemp)"
+  embedded="$(mktemp)"
+  red="$(mktemp)"
+  side_body="$(mktemp)"
+  u16="$(mktemp)"
+
+  fill_ffprobe "$file" "$streams" "$tags"
+  write_section_file "ffprobe" "$streams"
+  write_section_file "ffprobe-tags" "$tags"
+
+  fill_exif_header "$file" "$header"
+  write_section_file "exiftool" "$header"
+
+  fill_exif_embedded "$file" "$embedded"
+  write_section_file "exiftool-embedded" "$embedded"
+
+  body="$(xml_body "$slice" || true)"
+  printf '%s' "$body" >"$side_body"
+  write_section_file "xml" "$side_body"
+
+  if utf16_media "$file" UTF-16LE "$u16"; then
+    body="$(xml_body "$u16" || true)"
+    printf '%s' "$body" >"$side_body"
+  else
+    printf 'iconv not found\n' >"$side_body"
+  fi
+  write_section_file "xml-utf16le" "$side_body"
+
+  if utf16_media "$file" UTF-16BE "$u16"; then
+    body="$(xml_body "$u16" || true)"
+    printf '%s' "$body" >"$side_body"
+  else
+    printf 'iconv not found\n' >"$side_body"
+  fi
+  write_section_file "xml-utf16be" "$side_body"
+
+  side="$(find_sidecar "$file" "$mag_abs" || true)"
+  if [[ -n "$side" ]]; then
+    {
+      printf 'file: %s\n' "${side##*/}"
+      xml_body "$side" || true
+    } >"$side_body"
+  else
+    : >"$side_body"
+  fi
+  write_section_file "sidecar" "$side_body"
+
+  fill_redline "$file" "$red"
+  write_section_file "redline" "$red"
+
+  rm -f "$streams" "$tags" "$header" "$embedded" "$red" "$side_body" "$u16" "$slice"
+  echo "  wrote $report"
+}
+
+usage() {
+  echo "usage: mediapipeline-camscan [path]" >&2
+  echo "no path scans the error folder from ${CONF}" >&2
+  echo "a path with media files is one mag. otherwise each child directory is a mag." >&2
+  echo "writes \$HOME/camscan/<mag name>.txt" >&2
+}
+
+main() {
+  local target mag
+  local -a mags=()
+  shopt -s nullglob
+  [[ -n "${HOME:-}" ]] || { echo "HOME is not set" >&2; exit 1; }
+  load_conf
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+  if [[ $# -gt 1 ]]; then
+    usage
+    exit 1
+  fi
+  if [[ $# -eq 0 ]]; then
+    [[ -n "$error" ]] || { echo "config missing error" >&2; exit 1; }
+    target="$error"
+  else
+    target="$1"
+  fi
+  [[ -d "$target" ]] || { echo "not a directory: $target" >&2; exit 1; }
+  target="$(cd "$target" && pwd)"
+  if has_media "$target"; then
+    mags=("$target")
+  else
+    for mag in "$target"/*; do
+      [[ -d "$mag" ]] || continue
+      mags+=("$mag")
+    done
+  fi
+  [[ ${#mags[@]} -gt 0 ]] || { echo "no mags in $target" >&2; exit 1; }
+  out_dir="${HOME}/camscan"
+  mkdir -p "$out_dir"
+  if [[ "$slice_defaulted" -eq 1 ]]; then
+    echo "camscan_slice is not in the live conf. using ${camscan_slice}."
+  fi
+  if [[ "$timeout_defaulted" -eq 1 ]]; then
+    echo "camscan_timeout is not in the live conf. using ${camscan_timeout}."
+  fi
+  echo "scanning $target"
+  for mag in "${mags[@]}"; do
+    scan_mag "$mag"
+  done
+}
+
+chosen=""
+open_how=""
+stop_reason=""
+report=""
+out_dir=""
+main "$@"

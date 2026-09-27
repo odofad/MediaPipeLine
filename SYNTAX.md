@@ -105,6 +105,30 @@ The verbs:
 
 Stdout is for a person at the terminal. It is not this format. Do not parse it.
 
+## Camscan report
+
+`mediapipeline-camscan` writes one text file per mag. The file is `$HOME/camscan/` plus the mag folder name plus `.txt`. A second run overwrites that file.
+
+It is not a mag card. Detection does not read it. Do not copy it onto a card. A missing tag is the word `none`, not `unknown`. `unknown` stays a card word.
+
+The first lines are a banner, then `key: value` for the mag, the path, the file that was opened, its size in bytes, the slice size, and the scan time. `skipped:` is one unopened media file. It is omitted when the first file opened.
+
+Then sections, in this order. A section is a line `[name]`, then lines, then a blank line. An empty section is the single word `none`.
+
+| Section | What was read |
+| --- | --- |
+| `ffprobe` | Container and the first video and audio streams. Colour tags here are ffprobe's, not a camera word. |
+| `ffprobe-tags` | Format tags whose names match make, model, colour, or a camera maker. |
+| `exiftool` | Header tags only. No `-ee`. |
+| `exiftool-embedded` | The same file with `-ee`, stopped at `camscan_timeout`. |
+| `xml` | Panasonic elements, Sony `Item` attributes, and Sony device elements, from the head and the tail only. |
+| `xml-utf16le` | The same slice read as UTF-16LE, including a one-byte shift. |
+| `xml-utf16be` | The same slice read as UTF-16BE, including a one-byte shift. |
+| `sidecar` | A same-name sidecar beside the file or in `CLIP/`, read in full. |
+| `redline` | `REDline --printMeta` when the file is `.r3d`. Otherwise `not r3d`. |
+
+`timed out` means the tool was stopped. Partial lines above it are kept. `not found` means the tool was not on `PATH`.
+
 ## Camera rules
 
 `camera-rules.conf` uses the assignment line, then adds three rules of its own. `version = 1` comes before the first rule. A rule starts at `family` and ends at the next `family`. The closed lists for `applies`, `read`, `match`, and the other keys are the header of that file. `mediapipeline-camera-rules` checks them. Detection does not read the file yet.

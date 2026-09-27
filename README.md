@@ -22,6 +22,13 @@ MediaPipeLine/
 
 `bin/mediapipeline-status` is the SSH screen. It prints the timer, whether a pass is running, then Logging (`unprocessed`, `completed`, `failed`, `relog`) and Encoder (`queue`, `completed`, `failed`). `mediapipeline-status -f` redraws every 2 seconds. The encoder stays `not installed` until that service exists. An encoder log, when it exists, is `/var/log/mediapipeline/encode.log`.
 
+`bin/mediapipeline-camscan` reads one file per mag and writes a probe report. It does not move a folder and it does not write a mag card. No path scans `2.3.Error`. A path that holds media files is one mag. Otherwise each child directory is a mag. The report is `$HOME/camscan/<mag name>.txt`.
+
+```bash
+mediapipeline-camscan
+mediapipeline-camscan /var/lib/mediapipeline/archive/2.3.Error/2026_07_03_Example
+```
+
 ```bash
 sudo /opt/MediaPipeLine/install.sh
 ```

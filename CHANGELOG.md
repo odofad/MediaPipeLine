@@ -2,6 +2,12 @@
 
 Newest first.
 
+## 2026-09-27 — camscan
+
+`mediapipeline-camscan` probes one openable media file per mag and writes `$HOME/camscan/<mag name>.txt`. It does not move a folder and it does not write a mag card. The middle of the file is not grepped. XML is taken from `camscan_slice` bytes at the head and the tail, as UTF-8 and as UTF-16. ExifTool `-ee` and `REDline` stop after `camscan_timeout` seconds. Those two keys are in `pipe.conf`. A live conf that does not have them yet still runs, and the script says it is using `8388608` and `25`.
+
+How to run it, how the file is chosen, and what each section is for are in `notes/camscan.md`. The report shape is in `SYNTAX.md`. A missing tag is `none`, not `unknown`. ffprobe colour tags are recorded and are not a camera word.
+
 ## 2026-09-27 — syntax
 
 `SYNTAX.md` is the line shapes the project already uses. A new shape is added there before a script starts writing it.
