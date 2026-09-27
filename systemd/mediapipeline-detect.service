@@ -1,0 +1,7 @@
+[Unit]
+Description=MediaPipeLine detection pass
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mediapipeline-detect
