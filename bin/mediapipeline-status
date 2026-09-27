@@ -1,0 +1,276 @@
+#!/bin/bash
+# One screen of what MediaPipeLine is doing. Safe over SSH.
+# mediapipeline-status       print once
+# mediapipeline-status -f    redraw every 2 seconds, including new errors
+set -euo pipefail
+
+CONF=/etc/mediapipeline/pipe.conf
+ERROR_LOG=/var/log/mediapipeline/detect.log
+ENCODE_LOG=/var/log/mediapipeline/encode.log
+DETECT_UNIT=mediapipeline-detect.service
+TIMER_UNIT=mediapipeline-detect.timer
+ENCODE_UNIT=mediapipeline-encode.service
+
+logged=""
+relog=""
+recovery=""
+error=""
+convert=""
+converted=""
+hevc_root=""
+lock_file=""
+
+usage() {
+  echo "usage: mediapipeline-status [-f]" >&2
+  echo "  -f   redraw every 2 seconds until ctrl-c" >&2
+  exit 2
+}
+
+conf_get() {
+  local key="$1" line val
+  [[ -f "$CONF" ]] || return 1
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ "${line}" =~ ^[[:space:]]*${key}[[:space:]]*=(.*)$ ]] || continue
+    val="${BASH_REMATCH[1]}"
+    val="${val#"${val%%[![:space:]]*}"}"
+    val="${val%"${val##*[![:space:]]}"}"
+    printf '%s' "${val}"
+    return 0
+  done < "$CONF"
+  return 1
+}
+
+load_conf() {
+  local key
+  for key in logged relog recovery error convert converted hevc_root lock_file; do
+    printf -v "$key" '%s' "$(conf_get "$key" || true)"
+  done
+}
+
+child_count() {
+  local dir="$1" n=0 d
+  [[ -d "$dir" ]] || { printf 'missing'; return; }
+  [[ -r "$dir" ]] || { printf 'unreadable'; return; }
+  shopt -s nullglob
+  for d in "$dir"/*; do
+    n=$((n + 1))
+  done
+  shopt -u nullglob
+  printf '%s' "$n"
+}
+
+shoot_count() {
+  local dir="$1" n=0 d
+  [[ -d "$dir" ]] || { printf 'missing'; return; }
+  [[ -r "$dir" ]] || { printf 'unreadable'; return; }
+  shopt -s nullglob
+  for d in "$dir"/*/; do
+    [[ -d "$d" ]] || continue
+    n=$((n + 1))
+  done
+  shopt -u nullglob
+  printf '%s' "$n"
+}
+
+newest_shoot() {
+  local dir="$1" d best="" best_t=0 t
+  [[ -d "$dir" && -r "$dir" ]] || return 0
+  shopt -s nullglob
+  for d in "$dir"/*/; do
+    [[ -d "$d" ]] || continue
+    t="$(stat -c %Y "$d" 2>/dev/null || echo 0)"
+    if (( t > best_t )); then
+      best_t=$t
+      best="${d%/}"
+      best="${best##*/}"
+    fi
+  done
+  shopt -u nullglob
+  printf '%s' "$best"
+}
+
+unit_field() {
+  local unit="$1" prop="$2" line
+  command -v systemctl >/dev/null 2>&1 || return 0
+  line="$(systemctl show "$unit" -p "$prop" --no-pager 2>/dev/null || true)"
+  printf '%s' "${line#*=}"
+}
+
+pass_state() {
+  local active result
+  active="$(unit_field "$DETECT_UNIT" ActiveState)"
+  result="$(unit_field "$DETECT_UNIT" Result)"
+  if [[ "$active" == active || "$active" == activating ]]; then
+    printf 'running'
+    return
+  fi
+  if [[ -n "$lock_file" && -e "$lock_file" ]]; then
+    if [[ ! -w "$lock_file" ]]; then
+      printf 'unknown'
+      return
+    fi
+    if ! flock -n "$lock_file" -c true 2>/dev/null; then
+      printf 'running'
+      return
+    fi
+  fi
+  if [[ "$result" == "exit-code" || "$result" == "signal" || "$result" == "core-dump" ]]; then
+    printf 'failed'
+    return
+  fi
+  printf 'idle'
+}
+
+timer_line() {
+  local enabled active next last
+  if ! command -v systemctl >/dev/null 2>&1; then
+    printf 'systemctl not found'
+    return
+  fi
+  enabled="$(unit_field "$TIMER_UNIT" UnitFileState)"
+  active="$(unit_field "$TIMER_UNIT" ActiveState)"
+  next="$(unit_field "$TIMER_UNIT" NextElapseUSecRealtime)"
+  last="$(unit_field "$TIMER_UNIT" LastTriggerUSec)"
+  [[ -n "$enabled" ]] || enabled="not installed"
+  if [[ "$enabled" == enabled && "$active" == active ]]; then
+    printf 'enabled'
+  elif [[ "$enabled" == enabled ]]; then
+    printf 'enabled, not started'
+  else
+    printf '%s' "$enabled"
+  fi
+  [[ -n "$last" && "$last" != n/a ]] && printf '   last %s' "$last"
+  [[ -n "$next" && "$next" != n/a ]] && printf '   next %s' "$next"
+  printf '\n'
+}
+
+folder_line() {
+  local label="$1" dir="$2" kind="${3:-shoots}" n newest
+  if [[ "$kind" == files ]]; then
+    n="$(child_count "$dir")"
+  else
+    n="$(shoot_count "$dir")"
+  fi
+  newest="$(newest_shoot "$dir")"
+  if [[ -n "$newest" ]]; then
+    printf '  %-16s %s   %s\n' "$label" "$n" "$newest"
+  else
+    printf '  %-16s %s\n' "$label" "$n"
+  fi
+}
+
+gpu_lines() {
+  local line
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "  no nvidia-smi"
+    return
+  fi
+  if ! line="$(nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null)"; then
+    echo "  nvidia-smi failed"
+    return
+  fi
+  [[ -n "$line" ]] || { echo "  no gpu"; return; }
+  while IFS= read -r line; do
+    IFS=',' read -r name util used total temp <<<"$line"
+    name="${name#"${name%%[![:space:]]*}"}"
+    util="${util// /}"
+    used="${used// /}"
+    total="${total// /}"
+    temp="${temp// /}"
+    printf '  %s   %s%%   %s / %s MiB   %sC\n' "$name" "$util" "$used" "$total" "$temp"
+  done <<<"$line"
+}
+
+encoder_line() {
+  local active
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "  systemctl not found"
+    return
+  fi
+  if ! systemctl cat "$ENCODE_UNIT" >/dev/null 2>&1; then
+    echo "  not installed"
+    return
+  fi
+  active="$(unit_field "$ENCODE_UNIT" ActiveState)"
+  [[ -n "$active" ]] || active="unknown"
+  printf '  %s\n' "$active"
+}
+
+log_tail() {
+  local file="$1" n="$2"
+  if [[ ! -f "$file" ]]; then
+    echo "  none"
+    return
+  fi
+  if [[ ! -s "$file" ]]; then
+    echo "  none"
+    return
+  fi
+  tail -n "$n" "$file" | sed 's/^/  /'
+}
+
+draw() {
+  local user pass
+  user="$(unit_field "$DETECT_UNIT" User)"
+  [[ -n "$user" ]] || user="root"
+  pass="$(pass_state)"
+  echo "MediaPipeLine   $(hostname -s 2>/dev/null || hostname)   $(date '+%Y-%m-%d %H:%M:%S %Z')"
+  echo
+  echo "Detection   ${pass}   user ${user}"
+  printf '  timer   %s\n' "$(timer_line)"
+  echo
+  echo "Folders"
+  if [[ ! -f "$CONF" ]]; then
+    echo "  conf missing: $CONF"
+  else
+    folder_line "2.Logged" "$logged"
+    folder_line "2.1.Relog" "$relog"
+    folder_line "2.2.Recovery" "$recovery"
+    folder_line "2.3.Error" "$error"
+    folder_line "3.Convert" "$convert"
+    folder_line "4.Converted" "$converted"
+    folder_line "encode out" "$hevc_root" files
+  fi
+  echo
+  echo "GPU"
+  gpu_lines
+  echo
+  echo "Encoder"
+  encoder_line
+  if [[ -f "$ENCODE_LOG" ]]; then
+    echo "Encoder log"
+    log_tail "$ENCODE_LOG" 8
+  fi
+  echo
+  echo "Errors   $ERROR_LOG"
+  log_tail "$ERROR_LOG" 12
+}
+
+follow=0
+if [[ $# -gt 1 ]]; then
+  usage
+fi
+if [[ $# -eq 1 ]]; then
+  case "$1" in
+    -f|--follow) follow=1 ;;
+    -h|--help) usage ;;
+    *) usage ;;
+  esac
+fi
+
+load_conf
+
+if [[ "$follow" -eq 0 ]]; then
+  draw
+  exit 0
+fi
+
+trap 'printf "\n"; exit 0' INT TERM
+while true; do
+  printf '\033[H\033[2J'
+  draw
+  echo
+  echo "following, ctrl-c to stop"
+  sleep 2
+done
