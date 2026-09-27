@@ -1,1 +1,613 @@
-PLACEHOLDER_WILL_FAIL
+#!/bin/bash
+# One detection pass. Reads /etc/mediapipeline/pipe.conf.
+# Writes a mag card and stops. Does not encode.
+set -euo pipefail
+
+CONF=/etc/mediapipeline/pipe.conf
+ERROR_LOG=/var/log/mediapipeline/detect.log
+
+logged=""
+relog=""
+error=""
+settle_seconds=""
+lock_file=""
+card_suffix=""
+media_extensions=""
+sidecar_extensions=""
+ffprobe=""
+exiftool=""
+redline=""
+copyright=""
+owner=""
+
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+load_conf() {
+  local line key val
+  [[ -f "$CONF" ]] || { echo "missing config: $CONF" >&2; exit 1; }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || continue
+    key="$(trim "${line%%=*}")"
+    val="$(trim "${line#*=}")"
+    if [[ "$val" == \"*\" && "$val" == *\" ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+    case "$key" in
+      logged) logged=$val ;;
+      relog) relog=$val ;;
+      error) error=$val ;;
+      settle_seconds) settle_seconds=$val ;;
+      lock_file) lock_file=$val ;;
+      card_suffix) card_suffix=$val ;;
+      media_extensions) media_extensions=$val ;;
+      sidecar_extensions) sidecar_extensions=$val ;;
+      ffprobe) ffprobe=$val ;;
+      exiftool) exiftool=$val ;;
+      redline) redline=$val ;;
+      copyright) copyright=$val ;;
+      owner) owner=$val ;;
+    esac
+  done < "$CONF"
+  local need
+  for need in logged relog error settle_seconds lock_file card_suffix media_extensions sidecar_extensions ffprobe exiftool redline; do
+    [[ -n "${!need}" ]] || { log_error "config missing $need"; echo "config missing $need" >&2; exit 1; }
+  done
+  [[ "$settle_seconds" =~ ^[0-9]+$ ]] || { log_error "settle_seconds is not a number"; echo "settle_seconds is not a number" >&2; exit 1; }
+}
+
+log_error() {
+  mkdir -p "$(dirname "$ERROR_LOG")" 2>/dev/null || true
+  printf '%s %s\n' "$(date -Iseconds)" "$*" >> "$ERROR_LOG" || echo "could not write $ERROR_LOG" >&2
+}
+
+has_ext() {
+  local name="${1,,}" list="$2" ext
+  for ext in $list; do
+    [[ "$name" == *"$ext" ]] && return 0
+  done
+  return 1
+}
+
+is_dated_name() {
+  local name="$1"
+  [[ "$name" =~ ^([0-9]{4})_([0-9]{2})_([0-9]{2})_ ]] || return 1
+  date -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}" +%F >/dev/null 2>&1
+}
+
+known() {
+  local v
+  v="$(trim "${1:-}")"
+  if [[ -z "$v" ]]; then
+    printf 'unknown'
+  else
+    printf '%s' "$v"
+  fi
+}
+
+read_human_fields() {
+  local line
+  production=""
+  note=""
+  [[ -f "$1" ]] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      clip:*|orphan:*) break ;;
+      production:*) [[ -z "$production" ]] && production="$(trim "${line#production:}")" ;;
+      note:*) [[ -z "$note" ]] && note="$(trim "${line#note:}")" ;;
+    esac
+  done < "$1"
+}
+
+is_panasonic_make() {
+  local manufacturer="$1" model="$2"
+  shopt -s nocasematch
+  local hit=1
+  if [[ "$manufacturer" == *Panasonic* || "$model" == AG-* || "$model" == DC-* || "$model" == *Varicam* ]]; then
+    hit=0
+  fi
+  shopt -u nocasematch
+  return "$hit"
+}
+
+is_sony_make() {
+  local val="$1"
+  [[ -z "$val" ]] && return 1
+  shopt -s nocasematch
+  local hit=1
+  if [[ "$val" == Sony* || "$val" == *ILME-* || "$val" == *PXW-* ]]; then
+    hit=0
+  fi
+  shopt -u nocasematch
+  return "$hit"
+}
+
+parse_panasonic() {
+  local text="$1" line
+  pana_mfr="" pana_model="" pana_gamma="" pana_gamut=""
+  [[ -n "$text" ]] || return 0
+  while IFS= read -r line; do
+    [[ "$line" =~ \<(Manufacturer|ModelName|CaptureGamma|CaptureGamut)\>(.*) ]] || continue
+    case "${BASH_REMATCH[1]}" in
+      Manufacturer) pana_mfr=${BASH_REMATCH[2]} ;;
+      ModelName) pana_model=${BASH_REMATCH[2]} ;;
+      CaptureGamma) pana_gamma=${BASH_REMATCH[2]} ;;
+      CaptureGamut) pana_gamut=${BASH_REMATCH[2]} ;;
+    esac
+  done <<< "$text"
+}
+
+parse_sony_items() {
+  local text="$1" line name val
+  sony_gamma="" sony_gamut="" sony_make=""
+  [[ -n "$text" ]] || return 0
+  while IFS= read -r line; do
+    [[ "$line" =~ Item\ name=\"([^\"]+)\"\ value=\"([^\"]+)\" ]] || continue
+    name="${BASH_REMATCH[1]}"
+    val="${BASH_REMATCH[2]}"
+    case "$name" in
+      CaptureGammaEquation) sony_gamma=$val ;;
+      CaptureColorPrimaries) sony_gamut=$val ;;
+      Make|Manufacturer|Model|ModelName|CameraModelName)
+        if is_sony_make "$val"; then
+          sony_make=$val
+        fi
+        ;;
+    esac
+  done <<< "$text"
+}
+
+grep_panasonic() {
+  grep -a -o -E '<(Manufacturer|ModelName|CaptureGamma|CaptureGamut)>[^<]+' "$1" 2>/dev/null || true
+}
+
+grep_sony() {
+  grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manufacturer|Model|ModelName|CameraModelName)" value="[^"]+"' "$1" 2>/dev/null || true
+}
+
+find_sidecar() {
+  local file="$1" shoot="$2"
+  local stem stemlower place cand base lower ext
+  stem="${file##*/}"
+  stem="${stem%.*}"
+  stemlower="${stem,,}"
+  for place in "${file%/*}" "$shoot/CLIP"; do
+    [[ -d "$place" ]] || continue
+    for cand in "$place"/*; do
+      [[ -f "$cand" ]] || continue
+      base="${cand##*/}"
+      lower="${base,,}"
+      for ext in $sidecar_extensions; do
+        if [[ "$lower" == "${stemlower}${ext}" ]]; then
+          printf '%s' "$cand"
+          return 0
+        fi
+      done
+    done
+  done
+  return 1
+}
+
+fill_picture_ffprobe() {
+  local file="$1" line section="" acodec=""
+  width="" height="" frame_rate="" duration="" codec_name="" audio="" timecode=""
+  local -a audio_parts=()
+  local probe_tmp
+  command -v "$ffprobe" >/dev/null 2>&1 || return 0
+  probe_tmp=$(mktemp)
+  "$ffprobe" -v error -hide_banner \
+    -show_entries stream=codec_type,codec_name,width,height,avg_frame_rate,channels \
+    -show_entries format=duration:format_tags=timecode:stream_tags=timecode \
+    -of default=noprint_wrappers=1 "$file" > "$probe_tmp" 2>/dev/null || true
+  while IFS= read -r line; do
+    case "$line" in
+      codec_type=*) section=${line#codec_type=} ;;
+      codec_name=*)
+        if [[ "$section" == video && -z "$codec_name" ]]; then
+          codec_name=${line#codec_name=}
+        elif [[ "$section" == audio ]]; then
+          acodec=${line#codec_name=}
+        fi
+        ;;
+      width=*) [[ "$section" == video && -z "$width" ]] && width=${line#width=} ;;
+      height=*) [[ "$section" == video && -z "$height" ]] && height=${line#height=} ;;
+      avg_frame_rate=*)
+        if [[ "$section" == video && -z "$frame_rate" && "${line#avg_frame_rate=}" != "0/0" ]]; then
+          frame_rate=${line#avg_frame_rate=}
+        fi
+        ;;
+      channels=*)
+        if [[ "$section" == audio ]]; then
+          audio_parts+=("${acodec:-unknown} x ${line#channels=}")
+        fi
+        ;;
+      duration=*) [[ -z "$duration" ]] && duration=${line#duration=} ;;
+      TAG:timecode=*) [[ -z "$timecode" ]] && timecode=${line#TAG:timecode=} ;;
+    esac
+  done < "$probe_tmp"
+  rm -f "$probe_tmp"
+  if [[ ${#audio_parts[@]} -gt 0 ]]; then
+    audio="${audio_parts[0]}"
+    local i
+    for ((i = 1; i < ${#audio_parts[@]}; i++)); do
+      audio+=", ${audio_parts[$i]}"
+    done
+  fi
+}
+
+fill_picture_red() {
+  local text="$1" line key val frames="" fps=""
+  width="" height="" frame_rate="" duration="" timecode="" gamma="" gamut=""
+  codec_name="REDCODE"
+  audio=""
+  while IFS= read -r line; do
+    line="${line//$'\r'/}"
+    [[ "$line" =~ ^[[:space:]]*([^:]+):[[:space:]]*(.*)$ ]] || continue
+    key="$(trim "${BASH_REMATCH[1]}")"
+    val="$(trim "${BASH_REMATCH[2]}")"
+    [[ -z "$val" ]] && continue
+    # A line may itself end with "Key: value". Keep the last field.
+    if [[ "$val" == *": "* ]]; then
+      key="$(trim "${val%%:*}")"
+      val="$(trim "${val#*:}")"
+    fi
+    case "$key" in
+      "Gamma Curve"|"Gamma Space") gamma=$val ;;
+      "Color Space"|"ColorSpace") gamut=$val ;;
+      "Frame Width"|"Image Width") width=$val ;;
+      "Frame Height"|"Image Height") height=$val ;;
+      FPS|"Frame Rate"|"Record FPS"|"Record Framerate") fps=$val ;;
+      "Total Frames"|"Frame Count") frames=$val ;;
+      Duration) duration=$val ;;
+      "Start Timecode"|"Absolute Timecode"|"Edge Timecode"|"Timecode"|"Start Absolute Timecode")
+        [[ -z "$timecode" ]] && timecode=$val
+        ;;
+    esac
+  done <<< "$text"
+  if [[ -n "$fps" ]]; then
+    if [[ "$fps" =~ ^[0-9]+(\.0+)?$ ]]; then
+      frame_rate="${fps%%.*}/1"
+    else
+      frame_rate=$fps
+    fi
+  fi
+  if [[ -z "$duration" && -n "$frames" && -n "$fps" ]]; then
+    duration=$(awk -v f="$frames" -v r="$fps" 'BEGIN { if (r+0 == 0) exit 1; printf "%.2f", f/r }') || duration=""
+  fi
+}
+
+classify_other() {
+  local file="$1" make="" model="" line
+  camera="other"
+  gamma=""
+  gamut=""
+  command -v "$exiftool" >/dev/null 2>&1 || return 0
+  local exif_tmp
+  exif_tmp=$(mktemp)
+  "$exiftool" -s -Make -Model "$file" > "$exif_tmp" 2>/dev/null || true
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^Make[[:space:]]*:[[:space:]]*(.*)$ ]]; then
+      make="$(trim "${BASH_REMATCH[1]}")"
+    elif [[ "$line" =~ ^Model[[:space:]]*:[[:space:]]*(.*)$ ]]; then
+      model="$(trim "${BASH_REMATCH[1]}")"
+    fi
+  done < "$exif_tmp"
+  rm -f "$exif_tmp"
+  if is_panasonic_make "$make" "$model"; then
+    camera="Panasonic"
+  elif is_sony_make "$make" || is_sony_make "$model"; then
+    camera="Sony"
+  fi
+}
+
+probe_red() {
+  local file="$1" text
+  camera="RED"
+  gamma="" gamut=""
+  text=""
+  if command -v "$redline" >/dev/null 2>&1; then
+    text=$("$redline" --i "$file" --printMeta 1 2>&1 || true)
+    fill_picture_red "$text"
+  else
+    width="" height="" frame_rate="" duration="" timecode=""
+    codec_name="REDCODE"
+    audio=""
+    echo "redline not found: ${file##*/}" >&2
+    log_error "redline-missing ${base:-} ${file##*/}"
+  fi
+}
+
+probe_other_media() {
+  local file="$1" shoot="$2" text side
+  camera="" gamma="" gamut=""
+  text="$(grep_panasonic "$file")"
+  parse_panasonic "$text"
+  if [[ -n "$pana_gamma" || -n "$pana_gamut" ]] || is_panasonic_make "$pana_mfr" "$pana_model"; then
+    camera="Panasonic"
+    gamma=$pana_gamma
+    gamut=$pana_gamut
+    if [[ -z "$gamma" ]]; then
+      side="$(find_sidecar "$file" "$shoot" || true)"
+      if [[ -n "$side" ]]; then
+        parse_panasonic "$(grep_panasonic "$side")"
+        [[ -z "$gamma" ]] && gamma=$pana_gamma
+        [[ -z "$gamut" ]] && gamut=$pana_gamut
+      fi
+    fi
+  elif [[ -z "$text" ]]; then
+    parse_sony_items "$(grep_sony "$file")"
+    if [[ -n "$sony_gamma" || -n "$sony_make" ]]; then
+      camera="Sony"
+      gamma=$sony_gamma
+      gamut=$sony_gamut
+    else
+      classify_other "$file"
+    fi
+  else
+    classify_other "$file"
+  fi
+  [[ -n "$camera" ]] || camera="other"
+  fill_picture_ffprobe "$file"
+}
+
+write_block() {
+  local clip="$1" spans="${2:-}"
+  {
+    printf 'clip: %s\n' "$clip"
+    [[ -n "$spans" ]] && printf 'spans: %s\n' "$spans"
+    printf 'camera: %s\n' "$(known "$camera")"
+    printf 'width: %s\n' "$(known "$width")"
+    printf 'height: %s\n' "$(known "$height")"
+    printf 'frame_rate: %s\n' "$(known "$frame_rate")"
+    printf 'duration: %s\n' "$(known "$duration")"
+    printf 'codec: %s\n' "$(known "$codec_name")"
+    printf 'gamma: %s\n' "$(known "$gamma")"
+    printf 'gamut: %s\n' "$(known "$gamut")"
+    printf 'range: unknown\n'
+    printf 'audio: %s\n' "$(known "$audio")"
+    printf 'timecode: %s\n' "$(known "$timecode")"
+  } >> "$card_tmp"
+  remember_tag gamma "$gamma" "$camera"
+  remember_tag gamut "$gamut" "$camera"
+  mark_if_unresolved "$gamma" gamma
+  mark_if_unresolved "$gamut" gamut
+}
+
+conf_defines() {
+  local kind="$1" word="$2" line key
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    key="$(trim "${line%%=*}")"
+    [[ "$key" == "${kind}.${word}" ]] && return 0
+  done < "$CONF"
+  return 1
+}
+
+remember_tag() {
+  local kind="$1" word camera="$3" tag
+  word="$(trim "${2:-}")"
+  [[ -z "$word" || "$word" == unknown ]] && return 0
+  [[ "$word" == *$'\n'* || "$word" == *=* ]] && return 0
+  tag="${kind}.${word}"
+  [[ -n "${remembered[$tag]:-}" ]] && return 0
+  if conf_defines "$kind" "$word"; then
+    remembered[$tag]=1
+    return 0
+  fi
+  if ! grep -q '^# Seen on a card' "$CONF"; then
+    printf '\n# Seen on a card and not defined yet. Change unknown to a treatment. The encoder skips unknown.\n' >> "$CONF" \
+      || { log_error "conf-write-failed ${tag} ${base:-}"; echo "could not record ${tag}" >&2; return 0; }
+  fi
+  printf '%s = unknown\n' "$tag" >> "$CONF" \
+    || { log_error "conf-write-failed ${tag} ${base:-}"; echo "could not record ${tag}" >&2; return 0; }
+  remembered[$tag]=1
+  echo "undefined ${kind}: ${word}"
+}
+
+conf_value() {
+  local kind="$1" word="$2" line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    key="$(trim "${line%%=*}")"
+    [[ "$key" == "${kind}.${word}" ]] || continue
+    val="$(trim "${line#*=}")"
+    if [[ "$val" == \"*\" && "$val" == *\" ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+    printf '%s' "$val"
+    return 0
+  done < "$CONF"
+  return 1
+}
+
+mark_if_unresolved() {
+  local word value kind="$2"
+  word="$(trim "${1:-}")"
+  if [[ -z "$word" || "$word" == unknown ]]; then
+    folder_unresolved=1
+    log_error "unresolved ${kind} unknown ${base}"
+    return 0
+  fi
+  value="$(conf_value "$kind" "$word" || true)"
+  if [[ -z "$value" || "$value" == unknown ]]; then
+    folder_unresolved=1
+    log_error "unresolved ${kind} ${word} ${base}"
+  fi
+}
+
+process_folder() {
+  local dir="$1" base="$2"
+  local card media=() names=() f name
+  local -a rows=() orphan_names=()
+  local -A span_of=() row_prefix=()
+  card="${dir}${base}${card_suffix}"
+
+  if find "$dir" -maxdepth 1 -type f -newermt "-${settle_seconds} seconds" -print -quit | grep -q .; then
+    echo "skip settle: $base"
+    return 0
+  fi
+
+  shopt -s nullglob
+  for f in "$dir"*; do
+    [[ -f "$f" ]] || continue
+    name="${f##*/}"
+    has_ext "$name" "$media_extensions" || continue
+    media+=("$f")
+    names+=("$name")
+  done
+
+  for name in "$base" "${names[@]+"${names[@]}"}"; do
+    if ! is_dated_name "$name"; then
+      local dest="${relog}/${base}"
+      if [[ -e "$dest" ]]; then
+        echo "relog refused: $base"
+        log_error "relog-refused ${base}"
+        return 0
+      fi
+      if mv "$dir" "$dest"; then
+        echo "relog: $base"
+        log_error "relog ${base}"
+      else
+        echo "relog failed: $base" >&2
+        log_error "relog-failed ${base}"
+      fi
+      return 0
+    fi
+  done
+
+  if [[ -f "$card" ]]; then
+    local newer=0
+    for f in "${media[@]}"; do
+      [[ "$f" -nt "$card" ]] && newer=1 && break
+    done
+    if [[ "$newer" -eq 0 ]]; then
+      echo "skip carded: $base"
+      return 0
+    fi
+  fi
+
+  local prefix num stem
+  folder_unresolved=0
+  for f in "${media[@]}"; do
+    name="${f##*/}"
+    if has_ext "$name" ".r3d" && [[ "$name" =~ ^(.+)_([0-9]{3})\.[Rr]3[Dd]$ ]]; then
+      prefix="${BASH_REMATCH[1]}"
+      num="${BASH_REMATCH[2]}"
+      if [[ "$num" == "001" ]]; then
+        rows+=("$f")
+        row_prefix["$prefix"]=1
+      else
+        span_of["$prefix"]+="${span_of[$prefix]:+$'\n'}${name}"
+      fi
+    else
+      rows+=("$f")
+    fi
+  done
+  if [[ ${#span_of[@]} -gt 0 ]]; then
+    for prefix in "${!span_of[@]}"; do
+      [[ -n "${row_prefix[$prefix]:-}" ]] && continue
+      orphan_names+=("${span_of[$prefix]}")
+    done
+  fi
+
+  card_tmp=$(mktemp "${dir}.card.XXXXXX")
+  read_human_fields "$card"
+  {
+    printf 'folder: %s\n' "$base"
+    printf 'date: %s\n' "${base:0:4}-${base:5:2}-${base:8:2}"
+    [[ -n "$copyright" ]] && printf 'copyright: %s\n' "$copyright"
+    [[ -n "$owner" ]] && printf 'owner: %s\n' "$owner"
+    printf 'production: %s\n' "$production"
+    printf 'note: %s\n' "$note"
+    printf '\n'
+  } > "$card_tmp"
+
+  if [[ ${#orphan_names[@]} -gt 0 ]]; then
+    local o list
+    list=$(mktemp)
+    printf '%s\n' "${orphan_names[@]}" | sort -u > "$list"
+    while IFS= read -r o; do
+      [[ -n "$o" ]] && printf 'orphan: %s\n' "$o" >> "$card_tmp"
+    done < "$list"
+    rm -f "$list"
+    printf '\n' >> "$card_tmp"
+  fi
+
+  local sorted clip spans="" first=1 list
+  list=$(mktemp)
+  if [[ ${#rows[@]} -gt 0 ]]; then
+    printf '%s\0' "${rows[@]}" | sort -z > "$list"
+  fi
+  while IFS= read -r -d '' sorted || [[ -n "${sorted:-}" ]]; do
+    [[ -n "$sorted" ]] || continue
+    name="${sorted##*/}"
+    [[ "$first" -eq 0 ]] && printf '\n' >> "$card_tmp"
+    first=0
+    spans=""
+    if has_ext "$name" ".r3d" && [[ "$name" =~ ^(.+)_001\.[Rr]3[Dd]$ ]]; then
+      prefix="${BASH_REMATCH[1]}"
+      spans="${span_of[$prefix]:-}"
+      spans="${spans//$'\n'/ }"
+      probe_red "$sorted"
+      write_block "$name" "$spans"
+    elif has_ext "$name" ".r3d"; then
+      probe_red "$sorted"
+      write_block "$name"
+    else
+      probe_other_media "$sorted" "$dir"
+      write_block "$name"
+    fi
+  done < "$list"
+  rm -f "$list"
+
+  mv -f "$card_tmp" "$card"
+  card_tmp=""
+  echo "card: $base"
+  if [[ "$folder_unresolved" -eq 1 ]]; then
+    local dest="${error}/${base}"
+    if [[ -e "$dest" ]]; then
+      echo "error refused: $base"
+      log_error "error-refused ${base}"
+    elif mv "$dir" "$dest"; then
+      echo "error: $base"
+      log_error "error ${base}"
+    else
+      echo "error failed: $base" >&2
+      log_error "error-failed ${base}"
+    fi
+  fi
+}
+
+main() {
+  load_conf
+  [[ -d "$logged" ]] || { log_error "logged folder missing ${logged}"; echo "logged folder missing: $logged" >&2; exit 1; }
+  mkdir -p "$(dirname "$lock_file")" "$relog" "$error"
+  card_tmp=""
+  trap '[[ -n "${card_tmp:-}" ]] && rm -f "$card_tmp"' EXIT
+  declare -gA remembered=()
+  exec 9>"$lock_file"
+  if ! flock -n 9; then
+    echo "detection already running"
+    exit 0
+  fi
+  local dir base any=0
+  shopt -s nullglob
+  for dir in "${logged}"/*/; do
+    [[ -d "$dir" ]] || continue
+    any=1
+    base="${dir%/}"
+    base="${base##*/}"
+    process_folder "$dir" "$base"
+  done
+  [[ "$any" -eq 1 ]] || echo "no folders in $logged"
+}
+
+main "$@"
