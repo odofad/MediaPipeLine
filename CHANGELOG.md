@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — camscan colour pairs
+
+`mediapipeline-camscan` writes a `colour-pairs` section. It is one header line from MediaInfo for every media file in the mag: codec, bit depth, transfer, primaries, matrix, range, and HDR compatibility. `distinct` is how many different lines that produced. The section is evidence. It is not a camera word, and detection does not read it.
+
 ## 2026-09-27 — Apple, DJI, Insta360 named only
 
 Three `exiftool-make` rules name the camera and do not read colour. `Apple`, `DJI`, and `Insta360` are written on the card. Gamma and gamut stay empty, so the folder still goes to `2.3.Error`. They are not in `known-cameras.conf`.

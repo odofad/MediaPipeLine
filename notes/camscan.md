@@ -37,6 +37,7 @@ The middle of the file is not read. A grep of a whole MXF is what hung the hand 
 | `ffprobe` | Container, video size, frame rate, codec, audio, and ffprobe's own colour tags, from the whole file. The call uses `-show_format` and `-show_streams`. Those colour tags are not a camera word. |
 | `ffprobe-tags` | Format tags whose names look like make, model, colour, or a camera maker. Apple, DJI, and Insta360 often put the model here. |
 | `mediainfo` | `mediainfo --Full --ParseSpeed=0` on the whole file. That reads the header and does not walk the picture. `Other` blocks are kept, including `Other #1`. Audio is dropped. Size and duration lines are dropped. Colour, transfer, and matrix are not a camera word. Stopped after `camscan_timeout` seconds. |
+| `colour-pairs` | Every media file directly in the mag, not only the one that was opened. `mediainfo --ParseSpeed=0` reads the header of each. One line is codec, bit depth, transfer, primaries, matrix, range, and HDR compatibility. `files` is how many were read. `distinct` is how many different lines that produced. A file with no video line is `none`. This list is not a camera word. Each file stops after 15 seconds. |
 | `exiftool` | `Make`, `Model`, `Category`, device name, and the gamma tags. `-fast`, no `-ee`. Run on the head slice, then on the tail slice when the file is longer than the slice. The two slices are not joined for this read. `DeviceSerialNo` of `4294967295` or `0` is dropped. `ColorPrimaries` may appear. It is not a camera word. `ColorRangeLevels` is not requested. |
 | `exiftool-embedded` | `-ee -fast` on those same two slices, then only lines about gamma, colour, picture profile, device, make, model, or category. Each slice stops after `camscan_timeout` seconds. A `head` or `tail` line says which slice the lines came from. |
 | `xml` | Panasonic elements, Sony `Item name` / `value` in either order, and `DeviceManufacturer` / `DeviceModelName`, from the first `camscan_slice` bytes and the last `camscan_slice` bytes. |
@@ -64,6 +65,6 @@ camscan_timeout = 25
 
 ## How to use a report
 
-Read `mediainfo`, `exiftool`, `exiftool-embedded`, and the three `xml` sections. A camera rule is written only for a tag that appears there. `ffprobe` colour is evidence, not the word the card should copy. MediaInfo colour, transfer, and matrix are the same kind of evidence.
+Read `mediainfo`, `colour-pairs`, `exiftool`, `exiftool-embedded`, and the three `xml` sections. A camera rule is written only for a tag that appears in the single-file sections. `colour-pairs` says whether the mag is one picture or several. A row there is evidence. It is not the word the card should copy. `ffprobe` colour is the same kind of evidence. MediaInfo colour, transfer, and matrix are the same.
 
 If the file has a gamma word, that word is what goes on the card later. The treatment for it belongs in `pipe.conf`, not in this report. If the file has a model and no gamma word, do not invent one from a colour tag. A body that never writes a word and has no log picture is a block in `known-cameras.conf`. The FDR-AX53 is that case: `DeviceModelName` is `FDR-AX53`, and the block says `rec709`.

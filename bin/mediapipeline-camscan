@@ -469,6 +469,84 @@ fill_mediainfo() {
   rm -f "$raw" "$err"
 }
 
+# One line per media file in the mag. Header only. Not a camera word.
+# Columns: codec, bit depth, transfer, primaries, matrix, range, HDR compatibility.
+fill_colour_pairs() {
+  local mag="$1" dest="$2" f raw err rc line name norm
+  local list tally count=0
+  : >"$dest"
+  if ! command -v "$mediainfo" >/dev/null 2>&1; then
+    printf 'not found\n' >"$dest"
+    return 0
+  fi
+  list="$(mktemp)"
+  tally="$(mktemp)"
+  for f in "$mag"/*; do
+    [[ -f "$f" ]] || continue
+    has_ext "$f" "$media_extensions" || continue
+    [[ -s "$f" ]] || continue
+    printf '%s\n' "$f" >>"$list"
+  done
+  if [[ ! -s "$list" ]]; then
+    rm -f "$list" "$tally"
+    return 0
+  fi
+  while IFS= read -r f; do
+    count=$((count + 1))
+    name="${f##*/}"
+    raw="$(mktemp)"
+    err="$(mktemp)"
+    rc="$(capture_split "$OPEN_TIMEOUT" "$raw" "$err" \
+      env COLUMNS=240 "$mediainfo" --ParseSpeed=0 \
+      --Inform='Video;%Format%\t%BitDepth%\t%transfer_characteristics%\t%colour_primaries%\t%matrix_coefficients%\t%colour_range%\t%HDR_Format_Compatibility%\n' \
+      "$f")"
+    if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+      printf '%s\ttimed out\n' "$name" >>"$tally"
+    elif [[ ! -s "$raw" ]]; then
+      printf '%s\tnone\n' "$name" >>"$tally"
+    else
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+        norm="$(printf '%s\n' "$line" | awk -F '\t' 'BEGIN { OFS="\t" } {
+          n = NF
+          if (n < 7) n = 7
+          for (i = 1; i <= n; i++) if ($i == "") $i = "-"
+          out = $1
+          for (i = 2; i <= n; i++) out = out OFS $i
+          print out
+        }')"
+        printf '%s\t%s\n' "$name" "$norm" >>"$tally"
+      done <"$raw"
+    fi
+    rm -f "$raw" "$err"
+  done <"$list"
+  rm -f "$list"
+  {
+    printf '%s\n' "# every media file in the mag. header only. not a camera word."
+    printf 'files: %s\n' "$count"
+    local pairs distinct
+    pairs="$(awk -F '\t' '$2 != "timed out" && $2 != "none" {
+      p = $2
+      for (i = 3; i <= NF; i++) p = p "  " $i
+      print p
+    }' "$tally" | sort | uniq -c | sed 's/^[[:space:]]*//')"
+    if [[ -z "$pairs" ]]; then
+      printf 'distinct: 0\n'
+    else
+      distinct="$(printf '%s\n' "$pairs" | grep -c . || true)"
+      printf 'distinct: %s\n' "$distinct"
+      printf '%s\n' "$pairs"
+    fi
+    awk -F '\t' '{
+      if ($2 == "timed out" || $2 == "none") { print $1 "  " $2; next }
+      out = $1
+      for (i = 2; i <= NF; i++) out = out "  " $i
+      print out
+    }' "$tally"
+  } >"$dest"
+  rm -f "$tally"
+}
+
 exif_header_one() {
   local slice="$1" dest="$2" raw err rc
   raw="$(mktemp)"
@@ -607,7 +685,13 @@ scan_mag() {
       for s in "${skipped[@]}"; do
         printf 'skipped: %s\n' "$s"
       done
+      printf '\n'
     } >"$report"
+    local pairs
+    pairs="$(mktemp)"
+    fill_colour_pairs "$mag_abs" "$pairs"
+    write_section_file "colour-pairs" "$pairs"
+    rm -f "$pairs"
     echo "  wrote $report"
     return 0
   fi
@@ -629,6 +713,7 @@ scan_mag() {
     printf '%s\n' "# camscan report. Not a mag card. Detection does not read this file."
     printf '%s\n' "# ffprobe colour tags in this file are not a camera word."
     printf '%s\n' "# mediainfo colour, transfer, and matrix lines are not a camera word."
+    printf '%s\n' "# colour-pairs lists every media file. That list is not a camera word."
     printf 'mag: %s\n' "$mag_name"
     printf 'path: %s\n' "$mag_abs"
     printf 'file: %s\n' "${file##*/}"
@@ -658,6 +743,12 @@ scan_mag() {
 
   fill_mediainfo "$file" "$info"
   write_section_file "mediainfo" "$info"
+
+  local pairs
+  pairs="$(mktemp)"
+  fill_colour_pairs "$mag_abs" "$pairs"
+  write_section_file "colour-pairs" "$pairs"
+  rm -f "$pairs"
 
   fill_exif_header "$head_slice" "$tail_slice" "$header"
   write_section_file "exiftool" "$header"
