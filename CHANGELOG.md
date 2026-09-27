@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — folder scan walks mags
+
+A scan of a folder of mags reads one opened file in each mag, then the next mag. `colour-pairs` on that run is that one file. Point camscan at one mag to read every clip. The terminal prints each file it tries. `timeout` sends KILL if a tool ignores TERM.
+
 ## 2026-09-27 — camscan colour pairs
 
 `mediapipeline-camscan` writes a `colour-pairs` section. It is one header line from MediaInfo for every media file in the mag: codec, bit depth, transfer, primaries, matrix, range, and HDR compatibility. `distinct` is how many different lines that produced. The section is evidence. It is not a camera word, and detection does not read it.

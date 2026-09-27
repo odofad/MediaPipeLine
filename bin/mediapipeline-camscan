@@ -50,6 +50,13 @@ timeout_bin=timeout
 iconv_bin=iconv
 [[ -x /usr/bin/iconv ]] && iconv_bin=/usr/bin/iconv
 
+# TERM, then KILL. A tool that catches TERM must not hold the walk.
+run_to() {
+  local secs="$1"
+  shift
+  "$timeout_bin" --signal=TERM --kill-after=2 "$secs" "$@"
+}
+
 load_conf() {
   local line key val
   [[ -f "$CONF" ]] || { echo "missing config: $CONF" >&2; exit 1; }
@@ -124,7 +131,7 @@ capture() {
   local rc=0
   : >"$dest"
   if command -v "$timeout_bin" >/dev/null 2>&1; then
-    "$timeout_bin" --signal=TERM "$secs" "$@" >"$dest" 2>/dev/null || rc=$?
+    run_to "$secs" "$@" >"$dest" 2>/dev/null || rc=$?
   else
     "$@" >"$dest" 2>/dev/null || rc=$?
   fi
@@ -148,7 +155,7 @@ capture_split() {
   : >"$errf"
   errtmp="$(mktemp)"
   if command -v "$timeout_bin" >/dev/null 2>&1; then
-    "$timeout_bin" --signal=TERM "$secs" "$@" >"$dest" 2>"$errtmp" || rc=$?
+    run_to "$secs" "$@" >"$dest" 2>"$errtmp" || rc=$?
   else
     "$@" >"$dest" 2>"$errtmp" || rc=$?
   fi
@@ -263,7 +270,7 @@ file_opens() {
     return 0
   fi
   if command -v "$ffprobe" >/dev/null 2>&1; then
-    out="$("$timeout_bin" "$OPEN_TIMEOUT" "$ffprobe" -v error -show_format \
+    out="$(run_to "$OPEN_TIMEOUT" "$ffprobe" -v error -show_format \
       -show_entries format=format_name -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null || true)"
     if [[ -n "$(trim "$out")" ]]; then
       open_how="ffprobe"
@@ -271,7 +278,7 @@ file_opens() {
     fi
   fi
   if command -v "$exiftool" >/dev/null 2>&1; then
-    out="$("$timeout_bin" "$OPEN_TIMEOUT" "$exiftool" -s3 -FileType "$f" 2>/dev/null || true)"
+    out="$(run_to "$OPEN_TIMEOUT" "$exiftool" -s3 -FileType "$f" 2>/dev/null || true)"
     if [[ -n "$(trim "$out")" ]]; then
       open_how="exiftool"
       return 0
@@ -314,6 +321,7 @@ pick_file() {
       skipped+=("$name too small")
       continue
     fi
+    echo "  try $name"
     if file_opens "$f"; then
       chosen="$f"
       return 0
@@ -471,8 +479,9 @@ fill_mediainfo() {
 
 # One line per media file in the mag. Header only. Not a camera word.
 # Columns: codec, bit depth, transfer, primaries, matrix, range, HDR compatibility.
+# A third argument limits the walk to that one file.
 fill_colour_pairs() {
-  local mag="$1" dest="$2" f raw err rc line name norm
+  local mag="$1" dest="$2" only="${3:-}" f raw err rc line name norm
   local list tally count=0
   : >"$dest"
   if ! command -v "$mediainfo" >/dev/null 2>&1; then
@@ -481,12 +490,16 @@ fill_colour_pairs() {
   fi
   list="$(mktemp)"
   tally="$(mktemp)"
-  for f in "$mag"/*; do
-    [[ -f "$f" ]] || continue
-    has_ext "$f" "$media_extensions" || continue
-    [[ -s "$f" ]] || continue
-    printf '%s\n' "$f" >>"$list"
-  done
+  if [[ -n "$only" ]]; then
+    printf '%s\n' "$only" >"$list"
+  else
+    for f in "$mag"/*; do
+      [[ -f "$f" ]] || continue
+      has_ext "$f" "$media_extensions" || continue
+      [[ -s "$f" ]] || continue
+      printf '%s\n' "$f" >>"$list"
+    done
+  fi
   if [[ ! -s "$list" ]]; then
     rm -f "$list" "$tally"
     return 0
@@ -494,6 +507,7 @@ fill_colour_pairs() {
   while IFS= read -r f; do
     count=$((count + 1))
     name="${f##*/}"
+    echo "  colour $count $name"
     raw="$(mktemp)"
     err="$(mktemp)"
     rc="$(capture_split "$OPEN_TIMEOUT" "$raw" "$err" \
@@ -522,6 +536,9 @@ fill_colour_pairs() {
   rm -f "$list"
   {
     printf '%s\n' "# every media file in the mag. header only. not a camera word."
+    if [[ -n "$only" ]]; then
+      printf '%s\n' "# folder scan. this is the one opened file. the other clips were not read."
+    fi
     printf 'files: %s\n' "$count"
     local pairs distinct
     pairs="$(awk -F '\t' '$2 != "timed out" && $2 != "none" {
@@ -592,7 +609,7 @@ exif_embedded_one() {
   : >"$dest"
   rc=0
   if command -v "$timeout_bin" >/dev/null 2>&1; then
-    "$timeout_bin" --signal=TERM "$camscan_timeout" \
+    run_to "$camscan_timeout" \
       "$exiftool" -fast -m -a -s -G1 -ee "$slice" >"$raw" 2>"$err" || rc=$?
   else
     "$exiftool" -fast -m -a -s -G1 -ee "$slice" >"$raw" 2>"$err" || rc=$?
@@ -688,8 +705,16 @@ scan_mag() {
     } >"$report"
     local pairs
     pairs="$(mktemp)"
-    fill_colour_pairs "$mag_abs" "$pairs"
-    write_section_file "colour-pairs" "$pairs"
+    if [[ "${pairs_one:-0}" -eq 1 ]]; then
+      {
+        printf '[colour-pairs]\n'
+        printf '%s\n' "# folder scan. this mag did not open. the other clips were not read."
+        printf 'files: 0\n\n'
+      } >>"$report"
+    else
+      fill_colour_pairs "$mag_abs" "$pairs"
+      write_section_file "colour-pairs" "$pairs"
+    fi
     rm -f "$pairs"
     echo "  wrote $report"
     return 0
@@ -712,7 +737,11 @@ scan_mag() {
     printf '%s\n' "# camscan report. Not a mag card. Detection does not read this file."
     printf '%s\n' "# ffprobe colour tags in this file are not a camera word."
     printf '%s\n' "# mediainfo colour, transfer, and matrix lines are not a camera word."
-    printf '%s\n' "# colour-pairs lists every media file. That list is not a camera word."
+    if [[ "${pairs_one:-0}" -eq 1 ]]; then
+      printf '%s\n' "# colour-pairs is this one file. the other clips were not read."
+    else
+      printf '%s\n' "# colour-pairs lists every media file. That list is not a camera word."
+    fi
     printf 'mag: %s\n' "$mag_name"
     printf 'path: %s\n' "$mag_abs"
     printf 'file: %s\n' "${file##*/}"
@@ -745,7 +774,11 @@ scan_mag() {
 
   local pairs
   pairs="$(mktemp)"
-  fill_colour_pairs "$mag_abs" "$pairs"
+  if [[ "${pairs_one:-0}" -eq 1 ]]; then
+    fill_colour_pairs "$mag_abs" "$pairs" "$file"
+  else
+    fill_colour_pairs "$mag_abs" "$pairs"
+  fi
   write_section_file "colour-pairs" "$pairs"
   rm -f "$pairs"
 
@@ -824,6 +857,11 @@ main() {
     done
   fi
   [[ ${#mags[@]} -gt 0 ]] || { echo "no mags in $target" >&2; exit 1; }
+  pairs_one=0
+  if [[ ${#mags[@]} -gt 1 ]]; then
+    pairs_one=1
+    echo "folder scan: one opened file per mag, then the next mag"
+  fi
   out_dir="${HOME}/camscan"
   mkdir -p "$out_dir"
   if [[ "$mediainfo_defaulted" -eq 1 ]]; then
@@ -846,4 +884,5 @@ open_how=""
 stop_reason=""
 report=""
 out_dir=""
+pairs_one=0
 main "$@"
