@@ -135,12 +135,36 @@ is_panasonic_make() {
   return "$hit"
 }
 
-is_sony_make() {
+is_apple_make() {
   local val="$1"
   [[ -z "$val" ]] && return 1
   shopt -s nocasematch
   local hit=1
-  if [[ "$val" == Sony* || "$val" == *ILME-* || "$val" == *PXW-* ]]; then
+  if [[ "$val" == Apple* || "$val" == iPhone* ]]; then
+    hit=0
+  fi
+  shopt -u nocasematch
+  return "$hit"
+}
+
+is_dji_make() {
+  local val="$1"
+  [[ -z "$val" ]] && return 1
+  shopt -s nocasematch
+  local hit=1
+  if [[ "$val" == DJI* || "$val" == *DJI* ]]; then
+    hit=0
+  fi
+  shopt -u nocasematch
+  return "$hit"
+}
+
+is_insta_make() {
+  local val="$1"
+  [[ -z "$val" ]] && return 1
+  shopt -s nocasematch
+  local hit=1
+  if [[ "$val" == Insta360* || "$val" == *Insta360* ]]; then
     hit=0
   fi
   shopt -u nocasematch
@@ -330,27 +354,55 @@ fill_picture_red() {
 }
 
 classify_other() {
-  local file="$1" make="" model="" line
+  local file="$1" line val
   camera="other"
   gamma=""
   gamut=""
   command -v "$exiftool" >/dev/null 2>&1 || return 0
-  local exif_tmp
+  local exif_tmp vals=()
   exif_tmp=$(mktemp)
-  "$exiftool" -s -Make -Model "$file" > "$exif_tmp" 2>/dev/null || true
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM 25 "$exiftool" -fast -m -s -Make -Model -DeviceManufacturer -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
+  else
+    "$exiftool" -fast -m -s -Make -Model -DeviceManufacturer -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
+  fi
   while IFS= read -r line; do
-    if [[ "$line" =~ ^Make[[:space:]]*:[[:space:]]*(.*)$ ]]; then
-      make="$(trim "${BASH_REMATCH[1]}")"
-    elif [[ "$line" =~ ^Model[[:space:]]*:[[:space:]]*(.*)$ ]]; then
-      model="$(trim "${BASH_REMATCH[1]}")"
-    fi
+    [[ "$line" =~ ^[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(.*)$ ]] || continue
+    val="$(trim "${BASH_REMATCH[1]}")"
+    [[ -n "$val" ]] && vals+=("$val")
   done < "$exif_tmp"
   rm -f "$exif_tmp"
-  if is_panasonic_make "$make" "$model"; then
-    camera="Panasonic"
-  elif is_sony_make "$make" || is_sony_make "$model"; then
-    camera="Sony"
-  fi
+  local item
+  for item in "${vals[@]+"${vals[@]}"}"; do
+    if is_panasonic_make "$item" "$item"; then
+      camera="Panasonic"
+      return 0
+    fi
+  done
+  for item in "${vals[@]+"${vals[@]}"}"; do
+    if is_sony_make "$item"; then
+      camera="Sony"
+      return 0
+    fi
+  done
+  for item in "${vals[@]+"${vals[@]}"}"; do
+    if is_apple_make "$item"; then
+      camera="Apple"
+      return 0
+    fi
+  done
+  for item in "${vals[@]+"${vals[@]}"}"; do
+    if is_dji_make "$item"; then
+      camera="DJI"
+      return 0
+    fi
+  done
+  for item in "${vals[@]+"${vals[@]}"}"; do
+    if is_insta_make "$item"; then
+      camera="Insta360"
+      return 0
+    fi
+  done
 }
 
 lookup_known_model() {

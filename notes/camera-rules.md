@@ -28,6 +28,6 @@ The Sony attribute order is `name-value`. That is the FX6 shape. `either` is in 
 
 An FS5 or FS7 MXF does not carry that XML line. The same tag is a SMPTE label in the header. `mediapipeline-detect` reads it with ExifTool `-u -fast -CaptureGammaEquation` when the XML grep missed. The label read on both bodies, `060e2b34.0401.0101.04010101.01020000`, is written as `rec709`. A label that is not that value is copied as ExifTool printed it.
 
-## Not in the file
+## Named, no gamma word
 
-SmallSony is not a rule. The FDR-AX53 stores no gamma word, so it is a block in `known-cameras.conf`, not a camera rule. The phone, the DJI, and the Insta360 are not rules and are not in that file. No gamma word has been read from those files, and none of them is known to be only Rec. 709. The A7 word `rec709` and the FS5/FS7 label are the same card word. What the encoder does with `rec709` is `gamma.rec709` in `pipe.conf`.
+The phone, the DJI, and the Insta360 are rules that only name the camera. `exif-apple` matches `Apple*` or `iPhone*` and writes `Apple`. `exif-dji` matches `DJI*` and writes `DJI`. `exif-insta360` matches `Insta360*` and writes `Insta360`. None of them reads a colour tag. Gamma and gamut stay empty, so the folder still goes to `2.3.Error`. They are not in `known-cameras.conf`, because each body can record more than one picture.

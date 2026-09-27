@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — Apple, DJI, Insta360 named only
+
+Three `exiftool-make` rules name the camera and do not read colour. `Apple`, `DJI`, and `Insta360` are written on the card. Gamma and gamut stay empty, so the folder still goes to `2.3.Error`. They are not in `known-cameras.conf`.
+
 ## 2026-09-27 — known cameras
 
 `known-cameras.conf` lists a body that stores no gamma word and has no log picture. Detection uses it only when the clip's own gamma word is missing. The model match is exact. `FDR-AX53` is `rec709` / `rec709`. `install.sh` copies the file over the live one. The phone, the DJI, and the Insta360 are not listed.

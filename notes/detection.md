@@ -72,6 +72,8 @@ A Sony make is `CaptureGammaEquation` present, or a make/model string `ILME-…`
 5. **Sony MXF label**, only when that grep found no Sony item. The binary is `exiftool` from the conf. The command is `exiftool -u -fast -m -s3 -CaptureGammaEquation` on the real file, stopped after 25 seconds when `timeout` exists. `-u` is required. Without it, ExifTool hides this tag. `-fast` stays in the header. The label `060e2b34.0401.0101.04010101.01020000` is written as `rec709`. Any other value is copied as printed. Gamut is left empty. This is still camera `Sony`.
 6. **ExifTool make**, only when the label is also missing. Ask for `Make` and `Model` only. A matching make sets the camera. Gamma stays `unknown`. Do not ask ExifTool for `ColorSpace` or any picture colour tag.
 7. **`other`.** No camera match. Gamma and gamut are `unknown`. The folder goes to `2.3.Error` with the card.
+
+Apple, DJI, and Insta360 match on the make or the model and write that camera on the card. They do not write a gamma word. An empty gamma still sends the folder to `2.3.Error`.
 8. **Known camera**, only when the clip still has no gamma word. The file is `/etc/mediapipeline/known-cameras.conf`. ExifTool is asked for `Model`, `DeviceModelName`, and `CameraModelName`. An exact model line sets `camera`, `gamma`, and `gamut` from that block. `FDR-AX53` is `rec709` and `rec709`. A gamma word already read from the file is never replaced. A model that is not listed stays `unknown`.
 
 `ffprobe` `color_transfer` is never read. A missing gamma is never written as Rec.709 unless that model is listed in `known-cameras.conf`. The Panasonic value is the text inside the tag, including `HD`, `V-Log`, `V-LogL`, and `HLG`. The Sony and RED values are copied the same way.
