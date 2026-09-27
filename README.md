@@ -4,7 +4,7 @@ The archive pipeline. Camera originals land in a shoot folder. The picture is na
 
 The card keeps the camera's gamma and gamut. It does not rename them. `pipe.conf` says what the encoder does with each word. A word with no treatment is not encoded. A missing word is not filled in as Rec.709.
 
-The master copy lives on the pool at `/opt/MediaPipeLine`, so a reinstall of the system does not take it with it. This tree is the copy that is edited. `install.sh` puts it into the system locations.
+The master copy is this tree. `install.sh` puts the scripts into the system locations. Archive and encode paths stay in the live conf on that machine. The shipped defaults are under `/var/lib/mediapipeline/`.
 
 ## Where it stands
 

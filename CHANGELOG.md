@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — default paths
+
+The shipped folder paths are `/var/lib/mediapipeline/archive` and `/var/lib/mediapipeline/encode`. `install.sh` uses those only when the live conf has no path yet. A machine that already has a conf keeps the paths it is asked to keep. Notes and the README no longer name a particular pool.
+
 ## 2026-09-27 — readme
 
 The README is a description of the pipeline and its current goals. Install steps are no longer the front of the file. The short GitHub description matches that.

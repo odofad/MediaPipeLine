@@ -2,13 +2,7 @@
 
 A research probe. It reads one media file in a mag and writes a text report so a camera rule can be written from the tags that are actually there. It does not detect. It does not move a folder. It does not write a mag card. It does not add a treatment. Detection does not read the report.
 
-The command is `mediapipeline-camscan`. It is not a flag on another program. After you pull this tree, install it:
-
-```bash
-cd /opt/MediaPipeLine
-git pull
-sudo ./install.sh
-```
+The command is `mediapipeline-camscan`. It is not a flag on another program. After you pull this tree, install it with `sudo ./install.sh`.
 
 `install.sh` copies `bin/mediapipeline-camscan` to `/usr/local/bin/`. Do not edit that copy. Edit this tree and install again.
 
@@ -16,12 +10,11 @@ sudo ./install.sh
 
 ```bash
 mediapipeline-camscan
-mediapipeline-camscan /var/lib/mediapipeline/archive/2.3.Error
-mediapipeline-camscan /var/lib/mediapipeline/archive/2.3.Error/2026_07_03_Example
+mediapipeline-camscan /path/to/one/mag
 mediapipeline-camscan -h
 ```
 
-No path scans the `error` folder from `/etc/mediapipeline/pipe.conf`. On this server that is `2.3.Error`.
+No path scans the `error` folder from `/etc/mediapipeline/pipe.conf`.
 
 A path that itself holds media files is one mag. A path that does not is a folder of mags, and each direct child directory is one mag. It does not walk further than that. `CLIP/` and `.RDC/` are not searched for the clip.
 
