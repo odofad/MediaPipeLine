@@ -1,46 +1,37 @@
 # MediaPipeLine
 
-Master copy for the media pipeline. Detection, encoding, and the other pipeline scripts live here. This tree is the copy you edit.
+The archive pipeline. Camera originals land in a shoot folder. The picture is named from the camera's own words. An encode happens later, and only when that name already has a treatment.
 
-On the server it belongs at `/opt/MediaPipeLine`, on the pool, so a reinstall of Ubuntu does not take it with it.
+The card keeps the camera's gamma and gamut. It does not rename them. `pipe.conf` says what the encoder does with each word. A word with no treatment is not encoded. A missing word is not filled in as Rec.709.
+
+The master copy lives on the pool at `/opt/MediaPipeLine`, so a reinstall of the system does not take it with it. This tree is the copy that is edited. `install.sh` puts it into the system locations.
+
+## Where it stands
+
+Detection runs on a timer. One pass writes a mag card and stops. A folder name that is not a real date goes to Relog. Unknown colour goes to Error. A shoot whose colour is resolved stays in Logged. Nothing is moved to Convert, and nothing is encoded.
+
+The cameras detection can already read are RED, Panasonic, and the Sony bodies that write `CaptureGammaEquation`. `camera-rules.conf` is version 1 of that list. It says where a camera writes its word. It does not say what the encoder does with it. Detection does not read the file yet. The readers in the script are still what runs. `mediapipeline-camera-rules` only checks the grammar.
+
+`mediapipeline-status` reports the logging pass and the encoder. The encoder is not installed.
+
+`mediapipeline-camscan` opens one file in a mag and writes a report. It does not move the folder and it does not write a card. That report is how an unknown camera gets a rule. The first one read this way is the FDR-AX53: the model is in the file, and no gamma word is stored.
+
+## Where it is going
+
+A camera that still fails gets a rule only after its report shows the tag. Detection then reads the rule file instead of the readers written into the script. The encoder comes after that, and only for a treatment that is already decided. `rec709-as-is` is the decided case: the picture is already HD, so it is not converted. Every other treatment is a name. The filter or LUT for it is not chosen yet.
+
+## Tree
 
 ```text
 MediaPipeLine/
-  install.sh     copies this tree into the system locations
-  pipe.conf      shipped defaults for paths, tunables, and extensions
-  camera-rules.conf  where a camera writes its gamma word. Version 1.
-  SYNTAX.md      the line shapes the conf, the card, and the log share
-  bin/           scripts. Installed to /usr/local/bin
-  systemd/       units and timers. Installed to /etc/systemd/system
-  notes/         the script plan and the probe notes
-  CHANGELOG.md   what changed, newest first
+  install.sh          copies this tree into the system locations
+  pipe.conf           shipped paths, tunables, extensions, and treatments
+  camera-rules.conf   where a camera writes its gamma word
+  SYNTAX.md           the line shapes the conf, the card, the log, and a camscan report share
+  bin/                the scripts
+  systemd/            the detection timer
+  notes/              the plan for each script
+  CHANGELOG.md        what changed, newest first
 ```
 
-`camera-rules.conf` is the camera rule list. The grammar is fixed at version 1. `mediapipeline-camera-rules` checks that file and does not probe a clip. Detection does not read the file yet. A treatment stays in `pipe.conf`.
-
-`bin/mediapipeline-detect` is the detection pass. `systemd/` holds its timer. `install.sh` asks whether to enable that timer. The timer runs as the user you name. Press enter and it uses the user who ran `sudo`. 
-
-`bin/mediapipeline-status` is the SSH screen. It prints the timer, whether a pass is running, then Logging (`unprocessed`, `completed`, `failed`, `relog`) and Encoder (`queue`, `completed`, `failed`). `mediapipeline-status -f` redraws every 2 seconds. The encoder stays `not installed` until that service exists. An encoder log, when it exists, is `/var/log/mediapipeline/encode.log`.
-
-`bin/mediapipeline-camscan` reads one file per mag and writes a probe report. It does not move a folder and it does not write a mag card. No path scans `2.3.Error`. A path that holds media files is one mag. Otherwise each child directory is a mag. The report is `$HOME/camscan/<mag name>.txt`.
-
-```bash
-mediapipeline-camscan
-mediapipeline-camscan /var/lib/mediapipeline/archive/2.3.Error/2026_07_03_Example
-```
-
-```bash
-sudo /opt/MediaPipeLine/install.sh
-```
-
-`install.sh` installs `pipe.conf` to `/etc/mediapipeline/pipe.conf` only when that file does not exist yet. Every install refreshes `/etc/mediapipeline/pipe.conf.default`. It then asks for two roots. The archive root is the input. It creates `2.Logged`, `2.1.Relog`, `2.2.Recovery`, `2.3.Error`, `3.Convert`, and `4.Converted` under it. The encode output is the folder the encoder will write. Nothing encodes yet. Those seven paths are written into the live conf. Gamma, copyright, and the other keys are left alone. Press enter to keep the path already in the conf.
-
-Edit a script here, then install. Edit tunables in `/etc/mediapipeline/pipe.conf`, not in the shipped copy, or the next machine will not see the change until you copy it back.
-
-```bash
-sudo /opt/MediaPipeLine/install.sh
-```
-
-That replaces `/usr/local/bin` and `/etc/systemd/system` with the current `bin/` and `systemd/` files. A script removed from `bin/` is removed from `/usr/local/bin` on the next install. The installed script, `/etc/mediapipeline`, the log directory, and the folders just created are owned by the chosen user. The systemd unit files stay owned by root. Answering no to the timer leaves an already enabled timer as it is.
-
-Do not edit the copies under `/usr/local/bin`. The next install overwrites them.
+Tunables live in `/etc/mediapipeline/pipe.conf`. A later install does not overwrite that file. It only refreshes `pipe.conf.default`, and it asks again for the archive root and the encode output.

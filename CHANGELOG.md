@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — readme
+
+The README is a description of the pipeline and its current goals. Install steps are no longer the front of the file. The short GitHub description matches that.
+
 ## 2026-09-27 — camscan
 
 `mediapipeline-camscan` probes one openable media file per mag and writes `$HOME/camscan/<mag name>.txt`. It does not move a folder and it does not write a mag card. The middle of the file is not grepped. XML is taken from `camscan_slice` bytes at the head and the tail, as UTF-8 and as UTF-16. ExifTool `-ee` and `REDline` stop after `camscan_timeout` seconds. Those two keys are in `pipe.conf`. A live conf that does not have them yet still runs, and the script says it is using `8388608` and `25`.
