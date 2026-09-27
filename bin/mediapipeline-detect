@@ -135,6 +135,18 @@ is_panasonic_make() {
   return "$hit"
 }
 
+is_sony_make() {
+  local val="$1"
+  [[ -z "$val" ]] && return 1
+  shopt -s nocasematch
+  local hit=1
+  if [[ "$val" == Sony* ]]; then
+    hit=0
+  fi
+  shopt -u nocasematch
+  return "$hit"
+}
+
 is_apple_make() {
   local val="$1"
   [[ -z "$val" ]] && return 1
@@ -266,21 +278,39 @@ find_sidecar() {
 }
 
 fill_picture_ffprobe() {
-  local file="$1" line section="" acodec=""
+  local file="$1" line section="" acodec="" pending_name=""
   width="" height="" frame_rate="" duration="" codec_name="" audio="" timecode=""
   local -a audio_parts=()
   local probe_tmp
   command -v "$ffprobe" >/dev/null 2>&1 || return 0
   probe_tmp=$(mktemp)
+  # ffprobe prints codec_name before codec_type. The section wrappers are the
+  # stream boundary. Without them the next stream's name is filed on the previous type.
   "$ffprobe" -v error -hide_banner \
     -show_entries stream=codec_type,codec_name,width,height,avg_frame_rate,channels \
     -show_entries format=duration:format_tags=timecode:stream_tags=timecode \
-    -of default=noprint_wrappers=1 "$file" > "$probe_tmp" 2>/dev/null || true
+    -of default "$file" > "$probe_tmp" 2>/dev/null || true
   while IFS= read -r line; do
     case "$line" in
-      codec_type=*) section=${line#codec_type=} ;;
+      \[STREAM\]*)
+        section=""
+        pending_name=""
+        ;;
+      codec_type=*)
+        section=${line#codec_type=}
+        if [[ -n "$pending_name" ]]; then
+          if [[ "$section" == video && -z "$codec_name" ]]; then
+            codec_name=$pending_name
+          elif [[ "$section" == audio ]]; then
+            acodec=$pending_name
+          fi
+          pending_name=""
+        fi
+        ;;
       codec_name=*)
-        if [[ "$section" == video && -z "$codec_name" ]]; then
+        if [[ -z "$section" ]]; then
+          pending_name=${line#codec_name=}
+        elif [[ "$section" == video && -z "$codec_name" ]]; then
           codec_name=${line#codec_name=}
         elif [[ "$section" == audio ]]; then
           acodec=${line#codec_name=}
@@ -655,6 +685,18 @@ process_folder() {
       return 0
     fi
   done
+
+  if [[ ${#media[@]} -eq 0 ]]; then
+    echo "no media: $base"
+    local seen=0 line
+    if [[ -f "$ERROR_LOG" ]]; then
+      while IFS= read -r line; do
+        [[ "$line" == *" no-media ${base}" ]] && seen=1 && break
+      done < "$ERROR_LOG"
+    fi
+    [[ "$seen" -eq 0 ]] && log_error "no-media ${base}"
+    return 0
+  fi
 
   if [[ -f "$card" ]]; then
     local newer=0

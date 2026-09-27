@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — picture codec, Sony make, empty shoot
+
+`ffprobe` prints `codec_name` before `codec_type`. The old parser kept one section across streams, so the audio codec was written as the picture codec and the audio line was `unknown`. The section wrappers stay on, and a name that arrives before its type is held until the type line. `is_sony_make` was called and had no body. A make of `Sony` now sets the camera. A dated folder with no media file directly in it is not carded. The pass logs `no-media` once and leaves the folder. It still does not walk `CLIP/` or `PRIVATE/`.
+
 ## 2026-09-27 — sdscan
 
 `mediapipeline-sdscan` reads one card dump and writes `$HOME/sdscan/<folder>.txt`. `[constant]` is the tag that is the same on every clip. `[changes]` is the tag that is not. ExifTool `-u -fast` runs on the real file. The XML of a file up to `sdscan_whole_bytes` is read in full. A larger file is head and tail. The report does not translate a Sony label and it does not list container colour.

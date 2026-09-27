@@ -15,7 +15,7 @@ if file.lower().endswith(SUPPORTED_EXTENSIONS):
 
 `media_extensions` and `sidecar_extensions` are the same kind of list. The filename is lowercased, then tested with `endswith`. `.R3D` matches `.r3d`, and the same is true for `.MXF`, `.MOV`, `.MP4`, and `.MTS`. Uppercase copies are not added to the list. Adding `.mkv` is a change to the conf, not to the script. The old tuple also had `.mkv` and `.avi`. Those are not in `media_extensions` now. `.r3d` and `.mts` are, because detection needs them. The old script had no sidecar list. A sidecar is anything in `sidecar_extensions`.
 
-It watches only the direct children of `logged`. One child folder is one shoot. It does not walk subfolders. A card dump that hides the media in `CLIP/` or `.RDC/` is not seen.
+It watches only the direct children of `logged`. One child folder is one shoot. It does not walk subfolders. A card dump that hides the media in `CLIP/` or `.RDC/` is not a shoot. A dated folder with no media file directly in it is not carded. The pass logs `no-media` once and leaves the folder in `logged`. Flattening the card is the ingest step. `mediapipeline-sdscan` is the tool that walks a card.
 
 The lock file from `lock_file` is taken non-blocking. If a pass is already running, the new one exits 0. That is what stops a queued timer tick from waiting on a RED `printMeta`.
 
@@ -25,14 +25,15 @@ For each child folder:
 
 1. **Settle.** If any file directly in the folder has a modification time newer than `settle_seconds`, skip the folder. This uses modification time only as a copy-still-running check. It is not used to pair sidecars.
 2. **Name gate.** The folder name, and every file whose name ends with a `media_extensions` entry, must match `YYYY_MM_DD_` and the date must be a real calendar date. The filename is lowercased before the extension test, so `.R3D` matches `.r3d`. Sidecars and the mag card itself are not checked. One bad name moves the whole folder to `2.1.Relog`. If a folder of that name is already there, the move is refused and the folder stays, with a line on stdout. Nothing is probed.
-3. **Already carded.** If `<folder><card_suffix>` exists and every media file is older than that card, skip the folder. If a media file is newer than the card, the card is rebuilt. This runs after the name gate, so a bad name cannot hide behind an old card.
-4. **Clips.** Each media file becomes one card block, except a RED span.
-5. **Card.** Write the card to a temporary file in the shoot folder and rename it over `<folder><card_suffix>` only when the whole folder has been read.
-6. **Unknown colour.** If any clip's gamma or gamut is the word `unknown`, or the conf treatment for that word is `unknown`, move the whole folder to `2.3.Error`. The card goes with it. If a folder of that name is already there, the move is refused and the folder stays in `logged`. A defined treatment, including `rec709-as-is`, stays in `logged`.
+3. **No media.** If no file directly in the folder ends with a `media_extensions` entry, do not write a card. Print `no media` and log `no-media` the first time. Later passes print the line and do not log it again. The folder stays in `logged`.
+4. **Already carded.** If `<folder><card_suffix>` exists and every media file is older than that card, skip the folder. If a media file is newer than the card, the card is rebuilt. This runs after the name gate, so a bad name cannot hide behind an old card.
+5. **Clips.** Each media file becomes one card block, except a RED span.
+6. **Card.** Write the card to a temporary file in the shoot folder and rename it over `<folder><card_suffix>` only when the whole folder has been read.
+7. **Unknown colour.** If any clip's gamma or gamut is the word `unknown`, or the conf treatment for that word is `unknown`, move the whole folder to `2.3.Error`. The card goes with it. If a folder of that name is already there, the move is refused and the folder stays in `logged`. A defined treatment, including `rec709-as-is`, stays in `logged`.
 
 A bad name goes to `2.1.Relog`. An undefined gamma or gamut goes to `2.3.Error`. Those are the only moves.
 
-Errors are appended to `/var/log/mediapipeline/detect.log`. The path is not in `pipe.conf`. This script does not rotate or summarise that file. A normal card, a settle skip, and an already-carded skip are not logged. The lines a later script can read are `relog`, `relog-refused`, `relog-failed`, `unresolved`, `error`, `error-refused`, `error-failed`, `redline-missing`, and `conf-write-failed`.
+Errors are appended to `/var/log/mediapipeline/detect.log`. The path is not in `pipe.conf`. This script does not rotate or summarise that file. A normal card, a settle skip, and an already-carded skip are not logged. The lines a later script can read are `relog`, `relog-refused`, `relog-failed`, `no-media`, `unresolved`, `error`, `error-refused`, `error-failed`, `redline-missing`, and `conf-write-failed`.
 
 ```text
 2026-09-27T11:54:00+02:00 unresolved gamma CINE-D 2026_04_01_New_CX350

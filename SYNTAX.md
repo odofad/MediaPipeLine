@@ -92,6 +92,7 @@ The verbs:
 | `relog <folder>` | The name gate moved the shoot to `2.1.Relog`. |
 | `relog-refused <folder>` | A folder of that name was already in `2.1.Relog`. |
 | `relog-failed <folder>` | The move failed. |
+| `no-media <folder>` | The folder name is a real date and no media file is directly in it. The card is not written. Logged once. |
 | `unresolved gamma unknown <folder>` | A clip had no gamma word. `gamut` is the same shape. |
 | `unresolved gamma <word> <folder>` | The word was read and its treatment is missing or `unknown`. |
 | `error <folder>` | The shoot was moved to `2.3.Error`. |
