@@ -200,7 +200,7 @@ parse_panasonic() {
 
 parse_sony_items() {
   local text="$1" line name val
-  sony_gamma="" sony_gamut="" sony_make=""
+  sony_gamma="" sony_gamut="" sony_make="" sony_model=""
   [[ -n "$text" ]] || return 0
   while IFS= read -r line; do
     [[ "$line" =~ Item\ name=\"([^\"]+)\"\ value=\"([^\"]+)\" ]] || continue
@@ -209,9 +209,16 @@ parse_sony_items() {
     case "$name" in
       CaptureGammaEquation) sony_gamma=$val ;;
       CaptureColorPrimaries) sony_gamut=$val ;;
-      Make|Manufacturer|Model|ModelName|CameraModelName)
+      Make|Manufacturer)
         if is_sony_make "$val"; then
           sony_make=$val
+        fi
+        ;;
+      Model|ModelName|CameraModelName)
+        if is_sony_make "$val"; then
+          sony_make=$val
+        else
+          sony_model=$val
         fi
         ;;
     esac
@@ -226,10 +233,32 @@ grep_sony() {
   grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manufacturer|Model|ModelName|CameraModelName)" value="[^"]+"' "$1" 2>/dev/null || true
 }
 
+# AX53 writes this instead of Item name="CaptureGammaEquation".
+# modelName is the known-cameras key when that equation is absent.
+grep_sony_device() {
+  grep -a -o -E '<Device[[:space:]][^>]*>' "$1" 2>/dev/null || true
+}
+
+parse_sony_device() {
+  local text="$1" line
+  [[ -n "$text" ]] || return 0
+  while IFS= read -r line; do
+    if [[ -z "$sony_make" && "$line" =~ manufacturer=\"([^\"]*)\" ]]; then
+      if is_sony_make "${BASH_REMATCH[1]}"; then
+        sony_make=${BASH_REMATCH[1]}
+      fi
+    fi
+    if [[ "$line" =~ modelName=\"([^\"]*)\" ]]; then
+      [[ -n "${BASH_REMATCH[1]}" ]] && sony_model=${BASH_REMATCH[1]}
+    fi
+  done <<< "$text"
+}
+
 # MXF stores CaptureGammaEquation as a 16-byte SMPTE label, not as XML text.
 # ExifTool prints the label and hides it unless -u is set. -fast stays in the header.
-# The label below was read on an FS5 and an FS7. RDD 18 names it ITU-R BT.709.
+# The label below was read on an opened FS5. RDD 18 names it ITU-R BT.709.
 # The Sony XML spelling of that curve is rec709. Other labels are not translated.
+# A private acquisition tail such as 0E06040101010601 is a different field and is not read.
 sony_label_word() {
   local raw="$1" norm
   raw="$(trim "$raw")"
@@ -252,6 +281,31 @@ read_sony_label() {
     raw="$("$exiftool" -u -fast -m -s3 -CaptureGammaEquation "$file" 2>/dev/null || true)"
   fi
   sony_gamma="$(sony_label_word "$raw")"
+}
+
+# ColorPrimaries on the same picture descriptor is raw bytes. ExifTool prints
+# them only with -b. The one label below is the public BT.709 primaries, read
+# on the opened FS5. Anything else, including a Sony private label, stays empty.
+# ColorimetryCode is the matrix and is not read.
+sony_primaries_word() {
+  local hex="$1"
+  [[ "$hex" == "060e2b34040101060401010103030000" ]] && printf '%s' rec709
+}
+
+read_sony_primaries() {
+  local file="$1" tmp hex
+  sony_gamut=""
+  command -v "$exiftool" >/dev/null 2>&1 || return 0
+  tmp=$(mktemp)
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM 25 "$exiftool" -u -fast -m -s3 -b -ColorPrimaries "$file" > "$tmp" 2>/dev/null || true
+  else
+    "$exiftool" -u -fast -m -s3 -b -ColorPrimaries "$file" > "$tmp" 2>/dev/null || true
+  fi
+  # The label ends in two zero bytes. A shell variable drops them, so this stays a file.
+  hex="$(od -An -tx1 "$tmp" | tr -d ' \n')"
+  rm -f "$tmp"
+  sony_gamut="$(sony_primaries_word "$hex")"
 }
 
 find_sidecar() {
@@ -473,6 +527,18 @@ lookup_known_model() {
   return 1
 }
 
+# A listed model is the picture. CaptureGammaEquation does not override it.
+# An unlisted model leaves a real equation alone.
+use_known_model() {
+  local model="$1"
+  [[ -z "$model" ]] && return 1
+  lookup_known_model "$model" || return 1
+  camera=$known_hit_camera
+  gamma=$known_hit_gamma
+  gamut=$known_hit_gamut
+  return 0
+}
+
 apply_known_camera() {
   local file="$1" line val
   [[ -n "$gamma" ]] && return 0
@@ -520,6 +586,7 @@ probe_red() {
 probe_other_media() {
   local file="$1" shoot="$2" text side
   camera="" gamma="" gamut=""
+  sony_gamma="" sony_gamut="" sony_make="" sony_model=""
   text="$(grep_panasonic "$file")"
   parse_panasonic "$text"
   if [[ -n "$pana_gamma" || -n "$pana_gamut" ]] || is_panasonic_make "$pana_mfr" "$pana_model"; then
@@ -536,7 +603,8 @@ probe_other_media() {
     fi
   elif [[ -z "$text" ]]; then
     parse_sony_items "$(grep_sony "$file")"
-    if [[ -n "$sony_gamma" || -n "$sony_make" ]]; then
+    parse_sony_device "$(grep_sony_device "$file")"
+    if [[ -n "$sony_gamma" || -n "$sony_make" || -n "$sony_model" ]]; then
       camera="Sony"
       gamma=$sony_gamma
       gamut=$sony_gamut
@@ -545,12 +613,17 @@ probe_other_media() {
       if [[ -n "$sony_gamma" ]]; then
         camera="Sony"
         gamma=$sony_gamma
+        read_sony_primaries "$file"
+        gamut=$sony_gamut
       else
         classify_other "$file"
       fi
     fi
   else
     classify_other "$file"
+  fi
+  if [[ -n "${sony_model:-}" ]]; then
+    use_known_model "$sony_model" || true
   fi
   if [[ -z "$gamma" ]]; then
     apply_known_camera "$file"

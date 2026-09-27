@@ -63,19 +63,26 @@ A Panasonic make is a `Manufacturer` containing `Panasonic`, or a `ModelName` st
 
 2. **Same-name sidecar**, only when that grep found a Panasonic make and no `CaptureGamma`. The sidecar must be the same basename with an extension from `sidecar_extensions`, beside the file or in a `CLIP` directory inside the shoot folder. Same grep. A different filename is left alone.
 3. **Stop as Panasonic** when the make was found and neither the file nor the same-name sidecar has `CaptureGamma`. Gamma and gamut are `unknown`. The Sony grep is not run.
-4. **Sony grep**, only when the file had no Panasonic XML at all:
+4. **Sony grep**, only when the file had no Panasonic XML at all. Two shapes. The `Item name=` shape:
 
 ```bash
 grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manufacturer|Model|ModelName|CameraModelName)" value="[^"]+"' "$file"
 ```
 
-A Sony make is `CaptureGammaEquation` present, or a make/model string `ILME-…`, `PXW-…`, or `Sony`. The word `Sony` is only accepted as the make, not as a hit anywhere in the file.
-5. **Sony MXF label**, only when that grep found no Sony item. The binary is `exiftool` from the conf. The command is `exiftool -u -fast -m -s3 -CaptureGammaEquation` on the real file, stopped after 25 seconds when `timeout` exists. `-u` is required. Without it, ExifTool hides this tag. `-fast` stays in the header. The label `060e2b34.0401.0101.04010101.01020000` is written as `rec709`. Any other value is copied as printed. Gamut is left empty. This is still camera `Sony`.
-6. **ExifTool make**, only when the label is also missing. Ask for `Make` and `Model` only. A matching make sets the camera. Gamma stays `unknown`. Do not ask ExifTool for `ColorSpace` or any picture colour tag.
-7. **`other`.** No camera match. Gamma and gamut are `unknown`. The folder goes to `2.3.Error` with the card.
+And the `Device` shape the AX53 actually writes:
 
-Apple, DJI, and Insta360 match on the make or the model and write that camera on the card. They do not write a gamma word from the make. An empty gamma still sends the folder to `2.3.Error`, unless step 8 matches a known model. `iPhone 17 Pro Max` is that exception.
-8. **Known camera**, only when the clip still has no gamma word. The file is `/etc/mediapipeline/known-cameras.conf`. ExifTool is asked for `Model`, `DeviceModelName`, and `CameraModelName`. An exact model line sets `camera`, `gamma`, and `gamut` from that block. `FDR-AX53` is `rec709` and `rec709`. `iPhone 17 Pro Max` is `HLG` and `BT.2020`. A gamma word already read from the file is never replaced. A model that is not listed stays `unknown`.
+```bash
+grep -a -o -E '<Device[[:space:]][^>]*>' "$file"
+```
+
+`manufacturer="Sony"` is the make. `modelName` is the model. It is not thrown away for failing the make test. A Sony make is `CaptureGammaEquation` present, or a make string `Sony`. The word `Sony` is only accepted as the make, not as a hit anywhere in the file. `ILME-` and `PXW-` in the rule file are not matched by this script yet.
+5. **Known camera from that model**, when `modelName` or an Item model was read. The file is `/etc/mediapipeline/known-cameras.conf`. An exact model replaces `camera`, `gamma`, and `gamut`, including a `CaptureGammaEquation` on the same clip. A model that is not listed leaves the equation in place. `FDR-AX53` is `rec709` and `rec709`. This does not use ExifTool.
+6. **Sony MXF label**, only when that grep found no Sony item and no `Device` tag. The binary is `exiftool` from the conf. The gamma command is `exiftool -u -fast -m -s3 -CaptureGammaEquation` on the real file, stopped after 25 seconds when `timeout` exists. `-u` is required. Without it, ExifTool hides this tag. `-fast` stays in the header. The label `060e2b34.0401.0101.04010101.01020000` is written as `rec709`. Any other value is copied as printed. This was read on the opened FS5. It is not claimed for every FS7 mag. When that gamma word is set, a second command reads `ColorPrimaries` with `-b`. The 16 bytes `060e2b34040101060401010103030000` are written as `rec709`. Any other bytes, including a Sony private label, leave the gamut empty. `ColorimetryCode` is the matrix and is not read. A private acquisition tail is not read. This is still camera `Sony`.
+7. **ExifTool make**, only when the label is also missing. Ask for `Make` and `Model` only. A matching make sets the camera. Gamma stays `unknown`. Do not ask ExifTool for `ColorSpace` or any picture colour tag.
+8. **`other`.** No camera match. Gamma and gamut are `unknown`. The folder goes to `2.3.Error` with the card.
+
+Apple, DJI, and Insta360 match on the make or the model and write that camera on the card. They do not write a gamma word from the make. An empty gamma still sends the folder to `2.3.Error`, unless step 9 matches a known model. `iPhone 17 Pro Max` is that exception.
+9. **Known camera from ExifTool**, only when the clip still has no gamma word and step 5 did not see a model in the file. ExifTool is asked for `Model`, `DeviceModelName`, and `CameraModelName`. An exact model line sets `camera`, `gamma`, and `gamut` from that block. `iPhone 17 Pro Max` is `HLG` and `BT.2020`. A model that is not listed stays `unknown`.
 
 `ffprobe` `color_transfer` is never read. A missing gamma is never written as Rec.709 unless that model is listed in `known-cameras.conf`. The Panasonic value is the text inside the tag, including `HD`, `V-Log`, `V-LogL`, and `HLG`. The Sony and RED values are copied the same way.
 

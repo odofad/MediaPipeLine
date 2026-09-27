@@ -2,6 +2,22 @@
 
 Newest first.
 
+## 2026-09-27 — FS5 public primaries
+
+The opened FS5 picture descriptor has a public primaries label as well as the transfer label. Detection already wrote the transfer label as `rec709` and left the gamut empty, so the shoot stayed in Error. It now reads `ColorPrimaries` with `-b` only after that gamma word is set. The bytes `060e2b34040101060401010103030000` are written as `rec709`. Any other bytes stay empty. `ColorimetryCode` and the private acquisition labels are not read. MediaTrace is not a reader. This was checked on the opened FS5, not on an FS7 mag.
+
+## 2026-09-27 — A7RIII clip
+
+The opened A7RIII file is XAVC-S with `ILCE-7RM3`, `s-log3-cine`, and `s-gamut3-cine`. It is not a known-camera block. `CodingEquations` is `rec709` and is not the gamma. ExifTool's `-CaptureGammaEquation` prints nothing on this MP4. The byte grep is what reads the word. Written up in [notes/xavc.md](notes/xavc.md).
+
+## 2026-09-27 — XAVC findings
+
+[notes/xavc.md](notes/xavc.md) records the AX53 card and the opened FS5 MXF. The AX53 model is a `Device` tag and has no gamma word. The FS5 header is `Sony` / `Mem`, with a BT.709 transfer label detection already writes as `rec709` and a BT.709 primaries label it does not read.
+
+## 2026-09-27 — known camera from the Sony device tag
+
+The AX53 does not write `CaptureGammaEquation`. It writes `<Device manufacturer="Sony" modelName="FDR-AX53">` in the file. That model is looked up in `known-cameras.conf` without ExifTool. A listed model replaces an equation on the same clip. An unlisted model leaves the equation in place. `iec61966-2-4` is still not read.
+
 ## 2026-09-27 — picture codec, Sony make, empty shoot
 
 `ffprobe` prints `codec_name` before `codec_type`. The old parser kept one section across streams, so the audio codec was written as the picture codec and the audio line was `unknown`. The section wrappers stay on, and a name that arrives before its type is held until the type line. `is_sony_make` was called and had no body. A make of `Sony` now sets the camera. A dated folder with no media file directly in it is not carded. The pass logs `no-media` once and leaves the folder. It still does not walk `CLIP/` or `PRIVATE/`.
