@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — sdscan
+
+`mediapipeline-sdscan` reads one card dump and writes `$HOME/sdscan/<folder>.txt`. `[constant]` is the tag that is the same on every clip. `[changes]` is the tag that is not. ExifTool `-u -fast` runs on the real file. The XML of a file up to `sdscan_whole_bytes` is read in full. A larger file is head and tail. The report does not translate a Sony label and it does not list container colour.
+
 ## 2026-09-27 — iPhone 17 Pro Max in known cameras
 
 The error-folder scan had one exact model string: `iPhone 17 Pro Max`. That block is `HLG` / `BT.2020` / `Apple`. `gamut.BT.2020` is `bt2020`, a name with no LUT yet. `DJI FLIP` is an encoder string, not a model, and that body can shoot D-Log, so it is not a block. Sony Mem, the A7 XML, the Small Sony, and the Insta360 did not add a row. Sony Mem is shared. The A7 already has a gamma word. The other two had no model string.

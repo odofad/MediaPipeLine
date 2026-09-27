@@ -16,6 +16,8 @@ The cameras detection can already read are RED, Panasonic, and the Sony bodies t
 
 `mediapipeline-camscan` opens one file in a mag and writes a report. It does not move the folder and it does not write a card. A failed tool is recorded as `failed`, not as `none`. A file under 1 MB is skipped. That report is how an unknown camera gets a rule. A body that stores no gamma word is listed in `known-cameras.conf` instead. `FDR-AX53` is `rec709`. `iPhone 17 Pro Max` is `HLG` and `BT.2020`.
 
+`mediapipeline-sdscan` reads one SD card dump and writes which tags stay the same on every clip. It does not move a file and it does not write a card. That report is how a test card becomes an identifier.
+
 ## Where it is going
 
 A camera that still fails gets a rule only after its report shows the tag. Detection then reads the rule file instead of the readers written into the script. The encoder comes after that, and only for a treatment that is already decided. `rec709-as-is` is the decided case: the picture is already HD, so it is not converted. Every other treatment is a name. The filter or LUT for it is not chosen yet.
@@ -27,7 +29,7 @@ MediaPipeLine/
   install.sh          copies this tree into the system locations
   pipe.conf           shipped paths, tunables, extensions, and treatments
   camera-rules.conf   where a camera writes its gamma word
-  SYNTAX.md           the line shapes the conf, the card, the log, and a camscan report share
+  SYNTAX.md           the line shapes the conf, the card, the log, a camscan report, and an sdscan report share
   bin/                the scripts
   systemd/            the detection timer
   notes/              the plan for each script

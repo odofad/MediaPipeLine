@@ -1,0 +1,552 @@
+#!/bin/bash
+# Read one SD card dump. Report which tags stay the same across every clip,
+# and which tags change. Does not move files. Does not write a mag card.
+set -euo pipefail
+
+CONF=/etc/mediapipeline/pipe.conf
+WHOLE_DEFAULT=536870912
+TIMEOUT_DEFAULT=25
+SLICE_DEFAULT=8388608
+
+media_extensions=""
+sidecar_extensions=""
+ffprobe=""
+exiftool=""
+mediainfo=""
+camscan_slice=""
+camscan_timeout=""
+sdscan_whole_bytes=""
+timeout_defaulted=0
+slice_defaulted=0
+whole_defaulted=0
+
+TAGS=(
+  exif.Make
+  exif.Model
+  exif.DeviceManufacturer
+  exif.DeviceModelName
+  exif.CameraModelName
+  exif.DeviceSerialNo
+  exif.Software
+  exif.Encoder
+  exif.CaptureGammaEquation
+  exif.CaptureColorPrimaries
+  exif.CaptureGamma
+  exif.CaptureGamut
+  mi.Encoded_Application
+  ffprobe.encoder
+  ffprobe.make
+  ffprobe.model
+  ffprobe.quicktime.make
+  ffprobe.quicktime.model
+  ffprobe.quicktime.software
+  xml.sony.CaptureGammaEquation
+  xml.sony.CaptureColorPrimaries
+  xml.sony.Model
+  xml.pana.CaptureGamma
+  xml.pana.CaptureGamut
+  xml.pana.ModelName
+  xml.pana.Manufacturer
+  side.sony.CaptureGammaEquation
+  side.sony.CaptureColorPrimaries
+  side.sony.Model
+  side.pana.CaptureGamma
+  side.pana.CaptureGamut
+  side.pana.ModelName
+  side.pana.Manufacturer
+)
+
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+system_bin() {
+  local name="$1" base
+  base="${name##*/}"
+  case "$base" in
+    ffmpeg|ffprobe|exiftool|mediainfo)
+      if [[ -x "/usr/bin/${base}" ]]; then
+        printf '/usr/bin/%s' "$base"
+        return 0
+      fi
+      ;;
+  esac
+  printf '%s' "$name"
+}
+
+timeout_bin=timeout
+[[ -x /usr/bin/timeout ]] && timeout_bin=/usr/bin/timeout
+iconv_bin=iconv
+[[ -x /usr/bin/iconv ]] && iconv_bin=/usr/bin/iconv
+
+run_to() {
+  local secs="$1"
+  shift
+  "$timeout_bin" --signal=TERM --kill-after=2 "$secs" "$@"
+}
+
+load_conf() {
+  local line key val
+  [[ -f "$CONF" ]] || { echo "missing config: $CONF" >&2; exit 1; }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == *=* ]] || continue
+    key="$(trim "${line%%=*}")"
+    val="$(trim "${line#*=}")"
+    if [[ "$val" == \"*\" && "$val" == *\" ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+    case "$key" in
+      media_extensions) media_extensions=$val ;;
+      sidecar_extensions) sidecar_extensions=$val ;;
+      ffprobe) ffprobe=$val ;;
+      exiftool) exiftool=$val ;;
+      mediainfo) mediainfo=$val ;;
+      camscan_slice) camscan_slice=$val ;;
+      camscan_timeout) camscan_timeout=$val ;;
+      sdscan_whole_bytes) sdscan_whole_bytes=$val ;;
+    esac
+  done < "$CONF"
+  local need
+  for need in media_extensions sidecar_extensions ffprobe exiftool mediainfo; do
+    [[ -n "${!need}" ]] || { echo "config missing $need" >&2; exit 1; }
+  done
+  ffprobe="$(system_bin "$ffprobe")"
+  exiftool="$(system_bin "$exiftool")"
+  mediainfo="$(system_bin "$mediainfo")"
+  if [[ -z "$camscan_timeout" ]]; then
+    camscan_timeout=$TIMEOUT_DEFAULT
+    timeout_defaulted=1
+  fi
+  if [[ -z "$camscan_slice" ]]; then
+    camscan_slice=$SLICE_DEFAULT
+    slice_defaulted=1
+  fi
+  if [[ -z "$sdscan_whole_bytes" ]]; then
+    sdscan_whole_bytes=$WHOLE_DEFAULT
+    whole_defaulted=1
+  fi
+  [[ "$camscan_timeout" =~ ^[0-9]+$ && "$camscan_timeout" -gt 0 ]] || { echo "camscan_timeout is not a number" >&2; exit 1; }
+  [[ "$camscan_slice" =~ ^[0-9]+$ && "$camscan_slice" -gt 0 ]] || { echo "camscan_slice is not a number" >&2; exit 1; }
+  [[ "$sdscan_whole_bytes" =~ ^[0-9]+$ && "$sdscan_whole_bytes" -gt 0 ]] || { echo "sdscan_whole_bytes is not a number" >&2; exit 1; }
+}
+
+has_ext() {
+  local name="${1,,}" list="$2" ext
+  for ext in $list; do
+    [[ "$name" == *"$ext" ]] && return 0
+  done
+  return 1
+}
+
+stem_of() {
+  local base="${1##*/}"
+  printf '%s' "${base%.*}"
+}
+
+tool_ok() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+# clip, tag, value. A second value for the same pair is joined with " | ".
+remember() {
+  local clip="$1" tag="$2" val="$3" line c t old rest
+  val="$(trim "$val")"
+  val="${val//$'\t'/ }"
+  val="${val//$'\r'/ }"
+  val="${val//$'\n'/ }"
+  [[ -z "$val" || "$val" == "-" ]] && return 0
+  if [[ "$tag" == "exif.DeviceSerialNo" && ( "$val" == "0" || "$val" == "4294967295" ) ]]; then
+    return 0
+  fi
+  while IFS=$'\t' read -r c t old || [[ -n "${c:-}" ]]; do
+    [[ -n "${c:-}" ]] || continue
+    if [[ "$c" == "$clip" && "$t" == "$tag" ]]; then
+      [[ "$old" == "$val" ]] && return 0
+      case "| $old |" in
+        *"| $val |"*) return 0 ;;
+      esac
+      rest="$(grep -v -F -x "$(printf '%s\t%s\t%s' "$clip" "$tag" "$old")" "$TSV" || true)"
+      printf '%s\n' "$rest" > "$TSV"
+      printf '%s\t%s\t%s\n' "$clip" "$tag" "$old | $val" >> "$TSV"
+      return 0
+    fi
+  done < "$TSV"
+  printf '%s\t%s\t%s\n' "$clip" "$tag" "$val" >> "$TSV"
+}
+
+tag_value() {
+  local clip="$1" tag="$2" c t v
+  while IFS=$'\t' read -r c t v || [[ -n "${c:-}" ]]; do
+    [[ -n "${c:-}" ]] || continue
+    if [[ "$c" == "$clip" && "$t" == "$tag" ]]; then
+      printf '%s' "$v"
+      return 0
+    fi
+  done < "$TSV"
+  return 1
+}
+
+harvest_xml() {
+  local clip="$1" prefix="$2" src="$3" line name val
+  [[ -f "$src" ]] || return 0
+  local hits
+  hits="$(mktemp)"
+  grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Model|ModelName|CameraModelName)" value="[^"]+"' "$src" > "$hits" 2>/dev/null || true
+  while IFS= read -r line; do
+    [[ "$line" =~ Item\ name=\"([^\"]+)\"\ value=\"([^\"]+)\" ]] || continue
+    name="${BASH_REMATCH[1]}"
+    val="${BASH_REMATCH[2]}"
+    case "$name" in
+      CaptureGammaEquation) remember "$clip" "${prefix}.sony.CaptureGammaEquation" "$val" ;;
+      CaptureColorPrimaries) remember "$clip" "${prefix}.sony.CaptureColorPrimaries" "$val" ;;
+      Model|ModelName|CameraModelName) remember "$clip" "${prefix}.sony.Model" "$val" ;;
+    esac
+  done < "$hits"
+  grep -a -o -E '<(Manufacturer|ModelName|CaptureGamma|CaptureGamut)>[^<]+' "$src" > "$hits" 2>/dev/null || true
+  while IFS= read -r line; do
+    [[ "$line" =~ \<([A-Za-z0-9]+)\>([^<]+) ]] || continue
+    name="${BASH_REMATCH[1]}"
+    val="${BASH_REMATCH[2]}"
+    case "$name" in
+      CaptureGamma) remember "$clip" "${prefix}.pana.CaptureGamma" "$val" ;;
+      CaptureGamut) remember "$clip" "${prefix}.pana.CaptureGamut" "$val" ;;
+      ModelName) remember "$clip" "${prefix}.pana.ModelName" "$val" ;;
+      Manufacturer) remember "$clip" "${prefix}.pana.Manufacturer" "$val" ;;
+    esac
+  done < "$hits"
+  rm -f "$hits"
+}
+
+harvest_utf16() {
+  local clip="$1" src="$2" tmp
+  tool_ok "$iconv_bin" || return 0
+  tmp="$(mktemp)"
+  if run_to "$camscan_timeout" "$iconv_bin" -f UTF-16LE -t UTF-8 "$src" > "$tmp" 2>/dev/null; then
+    harvest_xml "$clip" xml "$tmp"
+  fi
+  if run_to "$camscan_timeout" "$iconv_bin" -f UTF-16BE -t UTF-8 "$src" > "$tmp" 2>/dev/null; then
+    harvest_xml "$clip" xml "$tmp"
+  fi
+  rm -f "$tmp"
+}
+
+slice_at() {
+  local file="$1" dest="$2" skip="$3" count="$4"
+  dd if="$file" of="$dest" bs=1 skip="$skip" count="$count" status=none 2>/dev/null || true
+}
+
+harvest_file_xml() {
+  local clip="$1" file="$2" bytes="$3" head tail
+  if [[ "$bytes" -le "$sdscan_whole_bytes" ]]; then
+    harvest_xml "$clip" xml "$file"
+    harvest_utf16 "$clip" "$file"
+    return 0
+  fi
+  head="$(mktemp)"
+  tail="$(mktemp)"
+  slice_at "$file" "$head" 0 "$camscan_slice"
+  if [[ "$bytes" -gt "$camscan_slice" ]]; then
+    slice_at "$file" "$tail" $((bytes - camscan_slice)) "$camscan_slice"
+  fi
+  harvest_xml "$clip" xml "$head"
+  [[ -s "$tail" ]] && harvest_xml "$clip" xml "$tail"
+  harvest_utf16 "$clip" "$head"
+  [[ -s "$tail" ]] && harvest_utf16 "$clip" "$tail"
+  rm -f "$head" "$tail"
+}
+
+harvest_exif() {
+  local clip="$1" file="$2" line name val out
+  tool_ok "$exiftool" || return 0
+  out="$(mktemp)"
+  run_to "$camscan_timeout" "$exiftool" -u -fast -m -s \
+    -Make -Model -DeviceManufacturer -DeviceModelName -CameraModelName \
+    -DeviceSerialNo -Software -Encoder \
+    -CaptureGammaEquation -CaptureColorPrimaries -CaptureGamma -CaptureGamut \
+    "$file" > "$out" 2>/dev/null || true
+  while IFS= read -r line; do
+    [[ "$line" =~ ^([A-Za-z0-9]+)[[:space:]]*:[[:space:]]*(.*)$ ]] || continue
+    name="${BASH_REMATCH[1]}"
+    val="$(trim "${BASH_REMATCH[2]}")"
+    case "$name" in
+      Make|Model|DeviceManufacturer|DeviceModelName|CameraModelName|DeviceSerialNo|Software|Encoder|CaptureGammaEquation|CaptureColorPrimaries|CaptureGamma|CaptureGamut)
+        remember "$clip" "exif.${name}" "$val"
+        ;;
+    esac
+  done < "$out"
+  rm -f "$out"
+}
+
+harvest_ffprobe() {
+  local clip="$1" file="$2" line key val out
+  tool_ok "$ffprobe" || return 0
+  out="$(mktemp)"
+  run_to "$camscan_timeout" "$ffprobe" -v error -show_entries format_tags \
+    -of default=noprint_wrappers=1 "$file" > "$out" 2>/dev/null || true
+  while IFS= read -r line; do
+    line="${line#TAG:}"
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    val="$(trim "${line#*=}")"
+    case "$key" in
+      encoder) remember "$clip" ffprobe.encoder "$val" ;;
+      make) remember "$clip" ffprobe.make "$val" ;;
+      model) remember "$clip" ffprobe.model "$val" ;;
+      com.apple.quicktime.make) remember "$clip" ffprobe.quicktime.make "$val" ;;
+      com.apple.quicktime.model) remember "$clip" ffprobe.quicktime.model "$val" ;;
+      com.apple.quicktime.software) remember "$clip" ffprobe.quicktime.software "$val" ;;
+    esac
+  done < "$out"
+  rm -f "$out"
+}
+
+harvest_mediainfo() {
+  local clip="$1" file="$2" val
+  tool_ok "$mediainfo" || return 0
+  val="$(run_to "$camscan_timeout" "$mediainfo" --ParseSpeed=0 \
+    --Inform="General;%Encoded_Application%" "$file" 2>/dev/null || true)"
+  remember "$clip" mi.Encoded_Application "$val"
+}
+
+find_sidecar() {
+  local file="$1" stem lower base cand
+  stem="$(stem_of "$file")"
+  stem="${stem,,}"
+  for cand in "${SIDECARS[@]}"; do
+    base="${cand##*/}"
+    lower="${base,,}"
+    local ext
+    for ext in $sidecar_extensions; do
+      if [[ "$lower" == "${stem}${ext}" ]]; then
+        printf '%s/%s' "$ROOT" "$cand"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+write_report() {
+  local report="$1" clip tag val first have differ
+  local -a const_lines=() change_blocks=() missing_lines=()
+  {
+    printf 'card: %s\n' "$CARD"
+    printf 'path: %s\n' "$ROOT"
+    printf 'clips: %s\n' "${#CLIPS[@]}"
+    printf 'sidecars: %s\n' "${#SIDECARS[@]}"
+    printf 'whole: %s\n' "$sdscan_whole_bytes"
+    printf 'scanned: %s\n' "$(date -Iseconds)"
+    tool_ok "$ffprobe" || printf 'tool: ffprobe not found\n'
+    tool_ok "$exiftool" || printf 'tool: exiftool not found\n'
+    tool_ok "$mediainfo" || printf 'tool: mediainfo not found\n'
+    printf '\n'
+    printf '[layout]\n'
+    if [[ ${#LAYOUT[@]} -eq 0 ]]; then
+      printf 'none\n'
+    else
+      printf '%s\n' "${LAYOUT[@]}"
+    fi
+    printf '\n'
+  } > "$report"
+
+  for tag in "${TAGS[@]}"; do
+    local side_tag=0 first="" have=0 differ=0 scope=0 val
+    [[ "$tag" == side.* ]] && side_tag=1
+    local -a rows=()
+    for clip in "${CLIPS[@]}"; do
+      if [[ "$side_tag" -eq 1 && -z "${SIDE_OF[$clip]:-}" ]]; then
+        continue
+      fi
+      scope=$((scope + 1))
+      if val="$(tag_value "$clip" "$tag")"; then
+        have=1
+        if [[ -z "$first" ]]; then
+          first=$val
+        elif [[ "$val" != "$first" ]]; then
+          differ=1
+        fi
+        rows+=("$(printf '  %s: %s' "$clip" "$val")")
+      else
+        differ=1
+        rows+=("$(printf '  %s: none' "$clip")")
+      fi
+    done
+    if [[ "$scope" -eq 0 || "$have" -eq 0 ]]; then
+      missing_lines+=("$tag")
+    elif [[ "$differ" -eq 0 && "$scope" -ge 2 ]]; then
+      const_lines+=("$(printf '%s: %s' "$tag" "$first")")
+    else
+      change_blocks+=("$tag")
+      local row
+      for row in "${rows[@]}"; do
+        change_blocks+=("$row")
+      done
+      change_blocks+=("")
+    fi
+  done
+
+  {
+    printf '[constant]\n'
+    if [[ ${#const_lines[@]} -eq 0 ]]; then
+      printf 'none\n'
+    else
+      printf '%s\n' "${const_lines[@]}"
+    fi
+    printf '\n'
+    printf '[changes]\n'
+    if [[ ${#change_blocks[@]} -eq 0 ]]; then
+      printf 'none\n\n'
+    else
+      printf '%s\n' "${change_blocks[@]}"
+    fi
+    printf '[missing]\n'
+    if [[ ${#missing_lines[@]} -eq 0 ]]; then
+      printf 'none\n'
+    else
+      printf '%s\n' "${missing_lines[@]}"
+    fi
+    printf '\n'
+    printf '[clips]\n'
+    if [[ ${#CLIPS[@]} -eq 0 ]]; then
+      printf 'none\n\n'
+    fi
+  } >> "$report"
+
+  for clip in "${CLIPS[@]}"; do
+    {
+      printf 'file: %s\n' "$clip"
+      printf 'bytes: %s\n' "${BYTES_OF[$clip]}"
+      printf 'read: %s\n' "${READ_OF[$clip]}"
+      if [[ -n "${SIDE_OF[$clip]:-}" ]]; then
+        printf 'sidecar: %s\n' "${SIDE_OF[$clip]}"
+      else
+        printf 'sidecar: none\n'
+      fi
+      for tag in "${TAGS[@]}"; do
+        if val="$(tag_value "$clip" "$tag")"; then
+          printf '%s: %s\n' "$tag" "$val"
+        fi
+      done
+      printf '\n'
+    } >> "$report"
+  done
+
+  {
+    printf '[unpaired]\n'
+    if [[ ${#UNPAIRED[@]} -eq 0 ]]; then
+      printf 'none\n'
+    else
+      printf '%s\n' "${UNPAIRED[@]}"
+    fi
+    printf '\n'
+  } >> "$report"
+}
+
+usage() {
+  echo "usage: mediapipeline-sdscan /path/to/one/card" >&2
+  echo "one folder is one card. the whole tree is walked." >&2
+  echo "writes \$HOME/sdscan/<folder name>.txt" >&2
+}
+
+main() {
+  local arg f rel bytes side stem paired report
+  shopt -s nullglob
+  [[ -n "${HOME:-}" ]] || { echo "HOME is not set" >&2; exit 1; }
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+  fi
+  if [[ $# -ne 1 ]]; then
+    usage
+    exit 1
+  fi
+  load_conf
+  arg="$1"
+  [[ -d "$arg" ]] || { echo "not a directory: $arg" >&2; exit 1; }
+  ROOT="$(cd "$arg" && pwd)"
+  CARD="${ROOT##*/}"
+  [[ "$timeout_defaulted" -eq 1 ]] && echo "camscan_timeout missing, using ${camscan_timeout}"
+  [[ "$slice_defaulted" -eq 1 ]] && echo "camscan_slice missing, using ${camscan_slice}"
+  [[ "$whole_defaulted" -eq 1 ]] && echo "sdscan_whole_bytes missing, using ${sdscan_whole_bytes}"
+
+  TSV="$(mktemp)"
+  CLIPS=()
+  SIDECARS=()
+  UNPAIRED=()
+  LAYOUT=()
+  declare -A BYTES_OF=()
+  declare -A READ_OF=()
+  declare -A SIDE_OF=()
+  declare -A MEDIA_STEMS=()
+
+  local name
+  for name in "$ROOT"/*; do
+    [[ -e "$name" ]] || continue
+    LAYOUT+=("${name##*/}")
+  done
+
+  local list
+  list="$(mktemp)"
+  find -P "$ROOT" -type f -printf '%p\n' | LC_ALL=C sort > "$list"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    rel="${f#"$ROOT"/}"
+    [[ "$rel" == *$'\t'* ]] && { echo "skipped (tab in name): $rel" >&2; continue; }
+    if has_ext "$f" "$media_extensions"; then
+      bytes="$(stat -c %s "$f" 2>/dev/null || echo 0)"
+      [[ "$bytes" -gt 0 ]] || continue
+      CLIPS+=("$rel")
+      BYTES_OF["$rel"]=$bytes
+      if [[ "$bytes" -le "$sdscan_whole_bytes" ]]; then
+        READ_OF["$rel"]=whole
+      else
+        READ_OF["$rel"]=head-tail
+      fi
+      stem="$(stem_of "$f")"
+      MEDIA_STEMS["${stem,,}"]=1
+    elif has_ext "$f" "$sidecar_extensions"; then
+      SIDECARS+=("$rel")
+    fi
+  done < "$list"
+  rm -f "$list"
+
+  for rel in "${CLIPS[@]}"; do
+    f="$ROOT/$rel"
+    bytes="${BYTES_OF[$rel]}"
+    echo "  $rel"
+    harvest_exif "$rel" "$f"
+    harvest_ffprobe "$rel" "$f"
+    harvest_mediainfo "$rel" "$f"
+    harvest_file_xml "$rel" "$f" "$bytes"
+    if side="$(find_sidecar "$f")"; then
+      SIDE_OF["$rel"]="${side#"$ROOT"/}"
+      harvest_xml "$rel" side "$side"
+    fi
+  done
+
+  for rel in "${SIDECARS[@]}"; do
+    stem="$(stem_of "$rel")"
+    paired=0
+    [[ -n "${MEDIA_STEMS[${stem,,}]:-}" ]] && paired=1
+    [[ "$paired" -eq 0 ]] && UNPAIRED+=("$rel")
+  done
+
+  mkdir -p "$HOME/sdscan"
+  report="$HOME/sdscan/${CARD}.txt"
+  write_report "$report"
+  rm -f "$TSV"
+
+  echo "$CARD"
+  echo "clips ${#CLIPS[@]}"
+  echo "wrote $report"
+  if [[ -s "$report" ]]; then
+    awk 'BEGIN{p=0} /^\[constant\]/{p=1; next} /^\[/{if(p) exit} p && $0!="none" {print}' "$report"
+  fi
+}
+
+main "$@"

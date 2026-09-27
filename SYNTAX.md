@@ -131,6 +131,29 @@ Then sections, in this order. A section is a line `[name]`, then lines, then a b
 
 `failed <status>` means the tool exited with no text. The next line is the first line it wrote to stderr. `timed out` means the tool was stopped. Partial lines above it are kept. `not found` means the tool was not on `PATH`.
 
+## Sdscan report
+
+`mediapipeline-sdscan` writes one text file per card dump. The file is `$HOME/sdscan/` plus the folder name plus `.txt`. A second run overwrites that file.
+
+It is not a mag card. Detection does not read it. Do not copy it onto a card. A missing tag is the word `none`, not `unknown`. `unknown` stays a card word.
+
+The first lines are `key: value`: `card`, `path`, `clips`, `sidecars`, `whole`, `scanned`. `tool:` is present when `ffprobe`, `exiftool`, or `mediainfo` was not on `PATH`.
+
+Then sections, in this order. A section is a line `[name]`, then lines, then a blank line. An empty section is the single word `none`.
+
+| Section | What was read |
+| --- | --- |
+| `layout` | The names directly inside the card folder. |
+| `constant` | A tag whose value is the same, and not empty, on at least two clips, and on every clip in that comparison. One line, `tag: value`. A sidecar tag is compared only across clips that have a sidecar. One clip is not a constant. |
+| `changes` | A tag that is not the same on every clip. The tag name is a line. Under it, one indented line per clip, `path: value`. A clip with no value is `none`. |
+| `missing` | A tag that was empty on every clip. One tag name per line. |
+| `clips` | One block per media file, path order. `file`, `bytes`, `read` (`whole` or `head-tail`), `sidecar`, then one `tag: value` line for each tag that clip actually had. Blocks are separated by a blank line. |
+| `unpaired` | A sidecar whose name does not match a clip. One path per line. |
+
+The tags, in this order, are `exif.Make`, `exif.Model`, `exif.DeviceManufacturer`, `exif.DeviceModelName`, `exif.CameraModelName`, `exif.DeviceSerialNo`, `exif.Software`, `exif.Encoder`, `exif.CaptureGammaEquation`, `exif.CaptureColorPrimaries`, `exif.CaptureGamma`, `exif.CaptureGamut`, `mi.Encoded_Application`, `ffprobe.encoder`, `ffprobe.make`, `ffprobe.model`, `ffprobe.quicktime.make`, `ffprobe.quicktime.model`, `ffprobe.quicktime.software`, `xml.sony.CaptureGammaEquation`, `xml.sony.CaptureColorPrimaries`, `xml.sony.Model`, `xml.pana.CaptureGamma`, `xml.pana.CaptureGamut`, `xml.pana.ModelName`, `xml.pana.Manufacturer`, and the same `xml` names with the prefix `side` when they were read from a sidecar.
+
+`exif.CaptureGammaEquation` is the raw label. The report does not translate it. A colour tag from the container is not in this list. `side` tags are compared only across clips that have a sidecar.
+
 ## Camera rules
 
 `camera-rules.conf` uses the assignment line, then adds three rules of its own. `version = 1` comes before the first rule. A rule starts at `family` and ends at the next `family`. The closed lists for `applies`, `read`, `match`, and the other keys are the header of that file. `mediapipeline-camera-rules` checks them. Detection does not read the file yet.
