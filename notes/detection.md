@@ -47,7 +47,7 @@ Where a camera writes its word is `camera-rules.conf`. The grammar is version 1,
 
 This script does not read that file yet. The steps below are still what runs. Change a reader here and change the rule in the same commit. See [camera-rules.md](camera-rules.md).
 
-The archivist ends the folder name with the camera. Detection does not read that word yet. It can name the body when the file itself has none. It cannot choose the gamma. An FS5, an FS7, and an A7 shoot more than one picture, so the folder word is not a picture profile. A mixed mag is still a logging problem. The folder may say A7 while one clip in it is an FX6.
+The archivist ends the folder name with the camera. A clip name is longer. The house pattern is `Year_Month_Day_Place_Persons_Content_CameraModel_ClipNumber_OptionalSubInfo`, as in `2020_11_27_Boston_WiumBrent_NgatiLionPride_FS5_01_SingleFemaleWithMale`. The camera is the field before the clip number, not whatever is last. Detection does not read either word yet. The word can name the body when the file itself has none. It cannot choose the gamma. An FS5, an FS7, and an A7 shoot more than one picture. A mixed mag is still a logging problem. The folder may say A7 while one clip in it is an FX6. See [archive.md](archive.md).
 
 ## Clip identity
 
