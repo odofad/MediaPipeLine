@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — clip id and comment
+
+Every clip block has an `id` and a `comment`. The id is the folder name, the clip filename, and five hex characters. A rebuild keeps the id and the comment. A new clip gets a new id and an empty comment. An empty comment is not the word `unknown`.
+
 ## 2026-09-27 — v1 card, colour on research
 
 v1 writes a mag card and does not read colour. A clip block is size, frame rate, duration, codec, audio, and timecode. There is no `camera`, `gamma`, `gamut`, or `range` line. A dated shoot stays in `2.Logged`. It is not moved because a colour word is missing.

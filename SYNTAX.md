@@ -37,6 +37,7 @@ note:
 orphan: clip_002.R3D
 
 clip: clip_001.R3D
+id: 2026_04_01_New_CX350_clip_001.R3D_a1b2c
 spans: clip_002.R3D clip_003.R3D
 width: 1920
 height: 1080
@@ -45,17 +46,20 @@ duration: 12.00
 codec: h264
 audio: pcm_s16le x 2
 timecode: 01:00:00:00
+comment:
 ```
 
 Header, in this order: `folder`, `date`, then `copyright` and `owner` only when those conf values are not empty, then `production`, then `note`, then a blank line.
 
 `date` is `YYYY-MM-DD`, taken from the first ten characters of the folder name.
 
-`production` and `note` are the only lines a person edits. A rebuild keeps the first of each and does not keep a hand edit of any other line. It stops reading those two at the first `clip:` or `orphan:` line.
+`production` and `note` are the only header lines a person edits. A rebuild keeps the first of each and does not keep a hand edit of any other header line. It stops reading those two at the first `clip:` or `orphan:` line.
 
 `orphan:` lines follow the header when a RED span has no `_001` in the folder. Then a blank line.
 
-Each clip is one block. Blocks are separated by one blank line. The keys, in this order, are `clip`, `spans` only when the clip has spans, `width`, `height`, `frame_rate`, `duration`, `codec`, `audio`, `timecode`. v1 does not write `camera`, `gamma`, `gamut`, or `range`. Colour detection is on the `research` branch.
+Each clip is one block. Blocks are separated by one blank line. The keys, in this order, are `clip`, `id`, `spans` only when the clip has spans, `width`, `height`, `frame_rate`, `duration`, `codec`, `audio`, `timecode`, `comment`. v1 does not write `camera`, `gamma`, `gamut`, or `range`. Colour detection is on the `research` branch.
+
+`id` is the folder name, the clip filename, and five hex characters, joined by `_`. A rebuild keeps the first `id` already on that clip. A clip with no `id` line gets a new one. `comment` is for a person. A rebuild keeps the first `comment` on that clip and writes an empty one when there is none. An empty comment is not the word `unknown`.
 
 ## Names
 

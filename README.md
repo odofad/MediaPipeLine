@@ -2,7 +2,7 @@
 
 The archive pipeline. Camera originals land in a shoot folder. v1 writes a mag card for that folder and stops. It does not read colour. Colour detection and the camera profiles are on the `research` branch.
 
-The card records the clip, its spans, and the picture ffprobe can see: size, frame rate, duration, codec, audio, and timecode. It does not record a camera, a gamma, or a gamut.
+The card records the clip, a stable id, a comment a person can fill later, and the picture ffprobe can see: size, frame rate, duration, codec, audio, and timecode. It does not record a camera, a gamma, or a gamut.
 
 The master copy is this tree. `install.sh` puts the scripts into the system locations. Archive and encode paths stay in the live conf on that machine. The shipped defaults are under `/var/lib/mediapipeline/`.
 

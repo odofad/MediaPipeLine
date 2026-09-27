@@ -53,6 +53,8 @@ For RED, those fields come from `REDline --printMeta` when that binary is on `PA
 
 `<folder><card_suffix>`, in the shoot folder. The date is the first ten characters of the folder name. `copyright` and `owner` are copied from `pipe.conf` when those values are not empty. A rebuild writes them again from the conf. `production` and `note` are for a person. The script leaves them empty on the first card and copies them onto the new card when it rebuilds. Each is one line.
 
+Each clip has an `id` and a `comment`. The id is the folder name, the clip filename, and five hex characters. A rebuild keeps that id. A new clip gets a new one. `comment` is empty until a person writes it. A rebuild keeps it.
+
 ```text
 folder: 2026_04_01_New_CX350
 date: 2026-04-01
@@ -62,6 +64,7 @@ production: Example
 note: 
 
 clip: clip_001.MOV
+id: 2026_04_01_New_CX350_clip_001.MOV_a1b2c
 width: 1920
 height: 1080
 frame_rate: 30000/1001
@@ -69,9 +72,10 @@ duration: 7228.720000
 codec: h264
 audio: pcm_s24le x 1, pcm_s24le x 1, pcm_s24le x 1, pcm_s24le x 1
 timecode: 08:55:11;12
+comment:
 ```
 
-An empty value is the word `unknown`, not a blank. One blank line between blocks. There is no `camera`, `gamma`, `gamut`, or `range` line.
+An empty probe value is the word `unknown`, not a blank. An empty `comment` stays blank. One blank line between blocks. There is no `camera`, `gamma`, `gamut`, or `range` line.
 
 The encoder is not built. When it is, it will not find a colour word on this card. Colour readers are on the `research` branch.
 

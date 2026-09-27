@@ -17,6 +17,8 @@ ffprobe=""
 redline=""
 copyright=""
 owner=""
+declare -A clip_id=()
+declare -A clip_comment=()
 
 trim() {
   local s="$1"
@@ -116,6 +118,32 @@ read_human_fields() {
       note:*) [[ -z "$note" ]] && note="$(trim "${line#note:}")" ;;
     esac
   done < "$1"
+}
+
+read_clip_fields() {
+  local line current=""
+  [[ -f "$1" ]] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      clip:*)
+        current="$(trim "${line#clip:}")"
+        ;;
+      id:*)
+        [[ -n "$current" && -z "${clip_id[$current]:-}" ]] && clip_id["$current"]="$(trim "${line#id:}")"
+        ;;
+      comment:*)
+        [[ -n "$current" && -z "${clip_comment[$current]+x}" ]] && clip_comment["$current"]="$(trim "${line#comment:}")"
+        ;;
+    esac
+  done < "$1"
+}
+
+new_clip_id() {
+  local mag="$1" clip="$2" hex
+  hex=$(od -An -N4 -tx1 /dev/urandom)
+  hex=${hex//[[:space:]]/}
+  hex=${hex:0:5}
+  printf '%s_%s_%s' "$mag" "$clip" "$hex"
 }
 
 fill_picture_ffprobe() {
@@ -240,9 +268,13 @@ probe_other_media() {
 }
 
 write_block() {
-  local clip="$1" spans="${2:-}"
+  local clip="$1" spans="${2:-}" mag="$3" id comment
+  id="${clip_id[$clip]:-}"
+  [[ -n "$id" ]] || id=$(new_clip_id "$mag" "$clip")
+  comment="${clip_comment[$clip]-}"
   {
     printf 'clip: %s\n' "$clip"
+    printf 'id: %s\n' "$id"
     [[ -n "$spans" ]] && printf 'spans: %s\n' "$spans"
     printf 'width: %s\n' "$(known "$width")"
     printf 'height: %s\n' "$(known "$height")"
@@ -251,6 +283,7 @@ write_block() {
     printf 'codec: %s\n' "$(known "$codec_name")"
     printf 'audio: %s\n' "$(known "$audio")"
     printf 'timecode: %s\n' "$(known "$timecode")"
+    printf 'comment: %s\n' "$comment"
   } >> "$card_tmp"
 }
 
@@ -341,7 +374,10 @@ process_folder() {
   fi
 
   card_tmp=$(mktemp "${dir}.card.XXXXXX")
+  clip_id=()
+  clip_comment=()
   read_human_fields "$card"
+  read_clip_fields "$card"
   {
     printf 'folder: %s\n' "$base"
     printf 'date: %s\n' "${base:0:4}-${base:5:2}-${base:8:2}"
@@ -379,13 +415,13 @@ process_folder() {
       spans="${span_of[$prefix]:-}"
       spans="${spans//$'\n'/ }"
       probe_red "$sorted"
-      write_block "$name" "$spans"
+      write_block "$name" "$spans" "$base"
     elif has_ext "$name" ".r3d"; then
       probe_red "$sorted"
-      write_block "$name"
+      write_block "$name" "" "$base"
     else
       probe_other_media "$sorted"
-      write_block "$name"
+      write_block "$name" "" "$base"
     fi
   done < "$list"
   rm -f "$list"
