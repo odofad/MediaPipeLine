@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — known cameras
+
+`known-cameras.conf` lists a body that stores no gamma word and has no log picture. Detection uses it only when the clip's own gamma word is missing. The model match is exact. `FDR-AX53` is `rec709` / `rec709`. `install.sh` copies the file over the live one. The phone, the DJI, and the Insta360 are not listed.
+
 ## 2026-09-27 — Sony MXF gamma label
 
 FS5 and FS7 store `CaptureGammaEquation` as a SMPTE label. Detection asks ExifTool for that one tag with `-u -fast` when the Sony XML grep misses. The label read on both bodies is written as `rec709`. `gamma.rec709` is `rec709-as-is`. Gamut is still empty on those files, so the shoot stays in Error until a gamut word exists.

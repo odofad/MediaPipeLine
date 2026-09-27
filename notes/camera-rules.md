@@ -30,4 +30,4 @@ An FS5 or FS7 MXF does not carry that XML line. The same tag is a SMPTE label in
 
 ## Not in the file
 
-SmallSony, phone, DJI, and Insta360 are not rules. No gamma word has been read from those files. The model `FDR-AX53` and the model `iPhone 17 Pro Max` are in their files, and neither stores a gamma word. The A7 word `rec709` and the FS5/FS7 label above are the same card word. What the encoder does with `rec709` is `gamma.rec709` in `pipe.conf`.
+SmallSony is not a rule. The FDR-AX53 stores no gamma word, so it is a block in `known-cameras.conf`, not a camera rule. The phone, the DJI, and the Insta360 are not rules and are not in that file. No gamma word has been read from those files, and none of them is known to be only Rec. 709. The A7 word `rec709` and the FS5/FS7 label are the same card word. What the encoder does with `rec709` is `gamma.rec709` in `pipe.conf`.

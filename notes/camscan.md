@@ -66,4 +66,4 @@ camscan_timeout = 25
 
 Read `mediainfo`, `exiftool`, `exiftool-embedded`, and the three `xml` sections. A camera rule is written only for a tag that appears there. `ffprobe` colour is evidence, not the word the card should copy. MediaInfo colour, transfer, and matrix are the same kind of evidence.
 
-If the file has a gamma word, that word is what goes on the card later. The treatment for it belongs in `pipe.conf`, not in this report. If the file has a model and no gamma word, do not invent one. The FDR-AX53 is that case: `DeviceModelName` is `FDR-AX53`, and no gamma word is stored. Version 1 of `camera-rules.conf` cannot say that yet. This script does not add the rule.
+If the file has a gamma word, that word is what goes on the card later. The treatment for it belongs in `pipe.conf`, not in this report. If the file has a model and no gamma word, do not invent one from a colour tag. A body that never writes a word and has no log picture is a block in `known-cameras.conf`. The FDR-AX53 is that case: `DeviceModelName` is `FDR-AX53`, and the block says `rec709`.

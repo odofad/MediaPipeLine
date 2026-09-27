@@ -4,6 +4,7 @@
 set -euo pipefail
 
 CONF=/etc/mediapipeline/pipe.conf
+KNOWN=/etc/mediapipeline/known-cameras.conf
 ERROR_LOG=/var/log/mediapipeline/detect.log
 
 logged=""
@@ -352,6 +353,71 @@ classify_other() {
   fi
 }
 
+lookup_known_model() {
+  local want="${1,,}" line key val
+  local cur_m="" cur_g="" cur_u="" cur_c=""
+  known_hit_camera="" known_hit_gamma="" known_hit_gamut=""
+  [[ -f "$KNOWN" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    key="$(trim "${line%%=*}")"
+    val="$(trim "${line#*=}")"
+    if [[ "$key" == model ]]; then
+      if [[ -n "$cur_m" && "${cur_m,,}" == "$want" && -n "$cur_g" && -n "$cur_u" && -n "$cur_c" ]]; then
+        known_hit_camera=$cur_c
+        known_hit_gamma=$cur_g
+        known_hit_gamut=$cur_u
+        return 0
+      fi
+      cur_m=$val
+      cur_g=""
+      cur_u=""
+      cur_c=""
+    elif [[ -n "$cur_m" ]]; then
+      case "$key" in
+        gamma) cur_g=$val ;;
+        gamut) cur_u=$val ;;
+        camera) cur_c=$val ;;
+      esac
+    fi
+  done < "$KNOWN"
+  if [[ -n "$cur_m" && "${cur_m,,}" == "$want" && -n "$cur_g" && -n "$cur_u" && -n "$cur_c" ]]; then
+    known_hit_camera=$cur_c
+    known_hit_gamma=$cur_g
+    known_hit_gamut=$cur_u
+    return 0
+  fi
+  return 1
+}
+
+apply_known_camera() {
+  local file="$1" line val
+  [[ -n "$gamma" ]] && return 0
+  [[ -f "$KNOWN" ]] || return 0
+  command -v "$exiftool" >/dev/null 2>&1 || return 0
+  local exif_tmp
+  exif_tmp=$(mktemp)
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM 25 "$exiftool" -fast -m -s -Model -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
+  else
+    "$exiftool" -fast -m -s -Model -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
+  fi
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(.*)$ ]] || continue
+    val="$(trim "${BASH_REMATCH[1]}")"
+    [[ -z "$val" ]] && continue
+    if lookup_known_model "$val"; then
+      camera=$known_hit_camera
+      gamma=$known_hit_gamma
+      gamut=$known_hit_gamut
+      rm -f "$exif_tmp"
+      return 0
+    fi
+  done < "$exif_tmp"
+  rm -f "$exif_tmp"
+}
+
 probe_red() {
   local file="$1" text
   camera="RED"
@@ -403,6 +469,9 @@ probe_other_media() {
     fi
   else
     classify_other "$file"
+  fi
+  if [[ -z "$gamma" ]]; then
+    apply_known_camera "$file"
   fi
   [[ -n "$camera" ]] || camera="other"
   fill_picture_ffprobe "$file"
