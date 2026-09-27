@@ -12,6 +12,7 @@ The conf stores the name, not a path. `ffmpeg`, `ffprobe`, and `exiftool` are re
 | --- | --- | --- |
 | `ffmpeg`, `ffprobe` | `ffmpeg` | `/usr/bin/ffmpeg`, `/usr/bin/ffprobe` |
 | `exiftool` | `libimage-exiftool-perl` | `/usr/bin/exiftool` |
+| `mediainfo` | `mediainfo` | `/usr/bin/mediainfo` |
 | `timeout` | `coreutils` | `/usr/bin/timeout` |
 | `iconv` | `libc-bin` | `/usr/bin/iconv` |
 | `systemctl` | `systemd` | `/usr/bin/systemctl` |
@@ -34,18 +35,16 @@ Jellyfin's ffmpeg is not an Ubuntu package. It is not an exception this pipeline
 
 ## New installer
 
-The current `install.sh` copies the scripts, installs the timer unit, asks for the archive root and the encode output, and warns when `REDline` is missing. It does not install packages. It does not check the Ubuntu release. It does not prove `ffprobe` or `exiftool` can start.
-
-The next `install.sh` keeps that copy-and-ask behaviour and adds:
+`install.sh` copies the scripts, installs the timer unit, asks for the archive root and the encode output, and warns when `REDline` is missing. It also does the following:
 
 1. Stop unless `/etc/os-release` says Ubuntu 26.04.
-2. `apt-get install` `ffmpeg` and `libimage-exiftool-perl`.
-3. Run `/usr/bin/ffprobe -version` and `/usr/bin/exiftool -ver`. Either failure stops the install. `command -v` is not the test.
-4. On a new conf, write `ffmpeg = ffmpeg`, `ffprobe = ffprobe`, and `exiftool = exiftool`. A later install still does not overwrite a live conf. It only refreshes `pipe.conf.default` and the folder paths it asks for.
+2. `apt-get install` `ffmpeg`, `libimage-exiftool-perl`, and `mediainfo`.
+3. Run `/usr/bin/ffprobe -version`, `/usr/bin/exiftool -ver`, and `/usr/bin/mediainfo --Version`. Any failure stops the install. `command -v` is not the test.
+4. On a new conf, write `ffmpeg = ffmpeg`, `ffprobe = ffprobe`, `exiftool = exiftool`, and `mediainfo = mediainfo`. A later install still does not overwrite a live conf. It only refreshes `pipe.conf.default` and the folder paths it asks for.
 5. Warn when `REDline` is not on `PATH`. Do not fail the install for that.
 6. Do not add Jellyfin's repository, do not install the NVIDIA driver, and do not copy a library into `/usr/local`.
 
-`install.sh` does those steps. A later install still does not overwrite a live conf.
+A later install still does not overwrite a live conf. A live conf without a `mediainfo` line still runs. Camscan uses the name `mediainfo` and says so.
 
 ## Review
 
@@ -54,9 +53,9 @@ Read on 2026-09-27 against the rules above.
 | Script | Result |
 | --- | --- |
 | `mediapipeline-detect` | `ffprobe` and `exiftool` go to `/usr/bin` when those files exist. `REDline` stays a `PATH` lookup. A missing `REDline` logs `redline-missing` and the pass continues. |
-| `mediapipeline-camscan` | The same two tools, plus `/usr/bin/timeout` and `/usr/bin/iconv` when those files exist. A missing `REDline` writes `not found` and the report is still written. |
+| `mediapipeline-camscan` | The same two tools, plus `/usr/bin/timeout`, `/usr/bin/iconv`, and `/usr/bin/mediainfo` when those files exist. A missing `REDline` writes `not found` and the report is still written. MediaInfo is evidence. Detection does not read it. |
 | `mediapipeline-status` | `/usr/bin/systemctl` and `/usr/bin/nvidia-smi` when those files exist. No `nvidia-smi` does not fail the screen. |
 | `mediapipeline-camera-rules` | No external binary. It checks the rule file only. |
-| `install.sh` | Stops unless the machine is Ubuntu 26.04. Installs `ffmpeg` and `libimage-exiftool-perl`. Stops if `/usr/bin/ffprobe` or `/usr/bin/exiftool` does not start. Warns when `REDline` is missing and still exits 0. |
+| `install.sh` | Stops unless the machine is Ubuntu 26.04. Installs `ffmpeg`, `libimage-exiftool-perl`, and `mediainfo`. Stops if `/usr/bin/ffprobe`, `/usr/bin/exiftool`, or `/usr/bin/mediainfo` does not start. Warns when `REDline` is missing and still exits 0. |
 
 The unit file starts `/usr/local/bin/mediapipeline-detect`. That is the right path for this project's own scripts.

@@ -14,12 +14,14 @@ media_extensions=""
 sidecar_extensions=""
 ffprobe=""
 exiftool=""
+mediainfo=""
 redline=""
 error=""
 camscan_slice=""
 camscan_timeout=""
 slice_defaulted=0
 timeout_defaulted=0
+mediainfo_defaulted=0
 
 trim() {
   local s="$1"
@@ -33,7 +35,7 @@ system_bin() {
   local name="$1" base
   base="${name##*/}"
   case "$base" in
-    ffmpeg|ffprobe|exiftool)
+    ffmpeg|ffprobe|exiftool|mediainfo)
       if [[ -x "/usr/bin/${base}" ]]; then
         printf '/usr/bin/%s' "$base"
         return 0
@@ -65,6 +67,7 @@ load_conf() {
       sidecar_extensions) sidecar_extensions=$val ;;
       ffprobe) ffprobe=$val ;;
       exiftool) exiftool=$val ;;
+      mediainfo) mediainfo=$val ;;
       redline) redline=$val ;;
       error) error=$val ;;
       camscan_slice) camscan_slice=$val ;;
@@ -76,8 +79,13 @@ load_conf() {
     [[ -n "${!need}" ]] || { echo "config missing $need" >&2; exit 1; }
   done
   [[ -n "$redline" ]] || redline="REDline"
+  if [[ -z "$mediainfo" ]]; then
+    mediainfo="mediainfo"
+    mediainfo_defaulted=1
+  fi
   ffprobe="$(system_bin "$ffprobe")"
   exiftool="$(system_bin "$exiftool")"
+  mediainfo="$(system_bin "$mediainfo")"
   if [[ -z "$camscan_slice" ]]; then
     camscan_slice=$SLICE_DEFAULT
     slice_defaulted=1
@@ -429,6 +437,37 @@ fill_ffprobe() {
   rm -f "$raw" "$err"
 }
 
+fill_mediainfo() {
+  local file="$1" dest="$2" raw err rc line
+  raw="$(mktemp)"
+  err="$(mktemp)"
+  : >"$dest"
+  if ! command -v "$mediainfo" >/dev/null 2>&1; then
+    printf 'not found\n' >"$dest"
+    rm -f "$raw" "$err"
+    return 0
+  fi
+  printf 'whole file, header only\n' >"$dest"
+  rc="$(capture_split "$camscan_timeout" "$raw" "$err" "$mediainfo" \
+    --Full --ParseSpeed=0 --Language=raw "$file")"
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+    printf 'timed out\n' >>"$dest"
+  elif [[ "$rc" -ne 0 && ! -s "$raw" ]]; then
+    printf 'failed %s\n' "$rc" >>"$dest"
+    line="$(grep -m1 . "$err" || true)"
+    [[ -n "$line" ]] && printf '%s\n' "$line" >>"$dest"
+    rm -f "$raw" "$err"
+    return 0
+  fi
+  awk '
+    /^[^[:space:]]/ && index($0, ":") == 0 { sec = $0; next }
+    sec == "Audio" || sec == "Menu" { next }
+    sec == "General" || sec == "Other" || sec == "Image" || sec == "Text" { print; next }
+    sec == "Video" && tolower($0) ~ /gamma|gamut|make|model|manufacturer|camera|device|profile|primar|transfer|matrix|colour|color|sony|picture|format|width|height|frame/ { print }
+  ' "$raw" | head -n 160 >>"$dest"
+  rm -f "$raw" "$err"
+}
+
 exif_header_one() {
   local slice="$1" dest="$2" raw err rc
   raw="$(mktemp)"
@@ -543,7 +582,7 @@ fill_redline() {
 
 scan_mag() {
   local mag="$1" mag_abs mag_name file body slice head_slice tail_slice u16 bytes
-  local streams tags header embedded red side_body
+  local streams tags header embedded info red side_body
   mag_abs="$(cd "$mag" && pwd)"
   mag_name="$(basename "$mag_abs")"
   if [[ "$mag_abs" == "/" || "$mag_abs" == "$HOME" ]]; then
@@ -588,6 +627,7 @@ scan_mag() {
   {
     printf '%s\n' "# camscan report. Not a mag card. Detection does not read this file."
     printf '%s\n' "# ffprobe colour tags in this file are not a camera word."
+    printf '%s\n' "# mediainfo colour, transfer, and matrix lines are not a camera word."
     printf 'mag: %s\n' "$mag_name"
     printf 'path: %s\n' "$mag_abs"
     printf 'file: %s\n' "${file##*/}"
@@ -606,6 +646,7 @@ scan_mag() {
   tags="$(mktemp)"
   header="$(mktemp)"
   embedded="$(mktemp)"
+  info="$(mktemp)"
   red="$(mktemp)"
   side_body="$(mktemp)"
   u16="$(mktemp)"
@@ -613,6 +654,9 @@ scan_mag() {
   fill_ffprobe "$file" "$streams" "$tags"
   write_section_file "ffprobe" "$streams"
   write_section_file "ffprobe-tags" "$tags"
+
+  fill_mediainfo "$file" "$info"
+  write_section_file "mediainfo" "$info"
 
   fill_exif_header "$head_slice" "$tail_slice" "$header"
   write_section_file "exiftool" "$header"
@@ -646,7 +690,7 @@ scan_mag() {
   fill_redline "$file" "$red"
   write_section_file "redline" "$red"
 
-  rm -f "$streams" "$tags" "$header" "$embedded" "$red" "$side_body" "$u16" "$slice" "$head_slice"
+  rm -f "$streams" "$tags" "$header" "$embedded" "$info" "$red" "$side_body" "$u16" "$slice" "$head_slice"
   [[ -n "$tail_slice" ]] && rm -f "$tail_slice"
   echo "  wrote $report"
 }
@@ -691,6 +735,9 @@ main() {
   [[ ${#mags[@]} -gt 0 ]] || { echo "no mags in $target" >&2; exit 1; }
   out_dir="${HOME}/camscan"
   mkdir -p "$out_dir"
+  if [[ "$mediainfo_defaulted" -eq 1 ]]; then
+    echo "mediainfo is not in the live conf. using ${mediainfo}."
+  fi
   if [[ "$slice_defaulted" -eq 1 ]]; then
     echo "camscan_slice is not in the live conf. using ${camscan_slice}."
   fi

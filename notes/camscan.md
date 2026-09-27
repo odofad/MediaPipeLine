@@ -36,6 +36,7 @@ The middle of the file is not read. A grep of a whole MXF is what hung the hand 
 | --- | --- |
 | `ffprobe` | Container, video size, frame rate, codec, audio, and ffprobe's own colour tags, from the whole file. The call uses `-show_format` and `-show_streams`. Those colour tags are not a camera word. |
 | `ffprobe-tags` | Format tags whose names look like make, model, colour, or a camera maker. Apple, DJI, and Insta360 often put the model here. |
+| `mediainfo` | `mediainfo --Full --ParseSpeed=0` on the whole file. That reads the header and does not walk the picture. General, Other, Image, and Text are kept. Audio is dropped. Video keeps format, size, and colour lines. Colour, transfer, and matrix are not a camera word. Stopped after `camscan_timeout` seconds. |
 | `exiftool` | `Make`, `Model`, `Category`, device name, and the gamma tags. `-fast`, no `-ee`. Run on the head slice, then on the tail slice when the file is longer than the slice. The two slices are not joined for this read. `DeviceSerialNo` of `4294967295` or `0` is dropped. `ColorPrimaries` may appear. It is not a camera word. `ColorRangeLevels` is not requested. |
 | `exiftool-embedded` | `-ee -fast` on those same two slices, then only lines about gamma, colour, picture profile, device, make, model, or category. Each slice stops after `camscan_timeout` seconds. A `head` or `tail` line says which slice the lines came from. |
 | `xml` | Panasonic elements, Sony `Item name` / `value` in either order, and `DeviceManufacturer` / `DeviceModelName`, from the first `camscan_slice` bytes and the last `camscan_slice` bytes. |
@@ -57,12 +58,12 @@ camscan_slice = 8388608
 camscan_timeout = 25
 ```
 
-`camscan_slice` is how many bytes are taken from the head and again from the tail. `camscan_timeout` is how many seconds one ExifTool `-ee` call on one slice is allowed to run, and how many seconds `REDline` is allowed. `ffprobe` and the header ExifTool call stop after 15 seconds. The header call is also one slice at a time.
+`camscan_slice` is how many bytes are taken from the head and again from the tail. `camscan_timeout` is how many seconds one ExifTool `-ee` call on one slice is allowed to run, how many seconds `REDline` is allowed, and how many seconds `mediainfo` is allowed. `ffprobe` and the header ExifTool call stop after 15 seconds. The header call is also one slice at a time.
 
 `install.sh` does not write these two lines into a live conf that already exists. If they are missing, the script uses `8388608` and `25` and says so on stdout. Add the two lines to `/etc/mediapipeline/pipe.conf` when you want the notice to stop. Do not put them only in the shipped `pipe.conf` and expect the live file to change. The next install will not copy them over.
 
 ## How to use a report
 
-Read `exiftool`, `exiftool-embedded`, and the three `xml` sections. A camera rule is written only for a tag that appears there. `ffprobe` colour is evidence, not the word the card should copy.
+Read `mediainfo`, `exiftool`, `exiftool-embedded`, and the three `xml` sections. A camera rule is written only for a tag that appears there. `ffprobe` colour is evidence, not the word the card should copy. MediaInfo colour, transfer, and matrix are the same kind of evidence.
 
 If the file has a gamma word, that word is what goes on the card later. The treatment for it belongs in `pipe.conf`, not in this report. If the file has a model and no gamma word, do not invent one. The FDR-AX53 is that case: `DeviceModelName` is `FDR-AX53`, and no gamma word is stored. Version 1 of `camera-rules.conf` cannot say that yet. This script does not add the rule.

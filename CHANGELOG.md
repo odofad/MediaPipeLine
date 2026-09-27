@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — mediainfo
+
+Camscan now runs `/usr/bin/mediainfo` on the whole file and writes a `[mediainfo]` section. `--ParseSpeed=0` reads the header and does not walk the picture. Audio blocks are dropped. Colour, transfer, and matrix lines are not a camera word. Detection does not read the section. `install.sh` installs the `mediainfo` package and stops if `/usr/bin/mediainfo` does not start.
+
 ## 2026-09-27 — installer
 
 `install.sh` now follows `notes/platform.md`. It stops unless the machine is Ubuntu 26.04. It installs `ffmpeg` and `libimage-exiftool-perl` from Ubuntu, then runs `/usr/bin/ffprobe -version` and `/usr/bin/exiftool -ver`. Either failure stops the install. A missing `REDline` is still only a warning. A live conf is still not overwritten.

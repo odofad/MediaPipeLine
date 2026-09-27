@@ -119,6 +119,7 @@ Then sections, in this order. A section is a line `[name]`, then lines, then a b
 | --- | --- |
 | `ffprobe` | Container and the streams, from the whole file. Colour tags here are ffprobe's, not a camera word. |
 | `ffprobe-tags` | Format tags whose names match make, model, colour, or a camera maker. |
+| `mediainfo` | Header of the whole file, from `mediainfo --Full --ParseSpeed=0`. Audio is omitted. Colour, transfer, and matrix lines are not a camera word. A missing binary is `not found`. |
 | `exiftool` | Header tags from the head slice, then the tail slice. No `-ee`. A `head` or `tail` line says which slice. `DeviceSerialNo` of `4294967295` or `0` is omitted. |
 | `exiftool-embedded` | `-ee` on those same two slices, stopped at `camscan_timeout` for each. A `head` or `tail` line says which slice. |
 | `xml` | Panasonic elements, Sony `Item` attributes, and Sony device elements, from the head and the tail only. |

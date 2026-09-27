@@ -37,10 +37,10 @@ if [[ "${os_id}" != "ubuntu" || "${os_version}" != "26.04" ]]; then
   exit 1
 fi
 
-echo "installing ffmpeg and exiftool from Ubuntu"
+echo "installing ffmpeg, exiftool, and mediainfo from Ubuntu"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ffmpeg libimage-exiftool-perl
+apt-get install -y ffmpeg libimage-exiftool-perl mediainfo
 if ! /usr/bin/ffprobe -version >/dev/null 2>&1; then
   echo "/usr/bin/ffprobe did not start. A library in /usr/local/lib may be hiding the Ubuntu package." >&2
   exit 1
@@ -49,7 +49,11 @@ if ! /usr/bin/exiftool -ver >/dev/null 2>&1; then
   echo "/usr/bin/exiftool did not start." >&2
   exit 1
 fi
-echo "ffprobe and exiftool start"
+if ! /usr/bin/mediainfo --Version >/dev/null 2>&1; then
+  echo "/usr/bin/mediainfo did not start." >&2
+  exit 1
+fi
+echo "ffprobe, exiftool, and mediainfo start"
 
 systemctl_bin=systemctl
 [[ -x /usr/bin/systemctl ]] && systemctl_bin=/usr/bin/systemctl
