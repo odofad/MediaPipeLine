@@ -11,11 +11,12 @@ MediaPipeLine/
   bin/           scripts. Installed to /usr/local/bin
   systemd/       units and timers. Installed to /etc/systemd/system
   notes/         the script plan and the probe notes
+  CHANGELOG.md   what changed, newest first
 ```
 
 `bin/mediapipeline-detect` is the detection pass. `systemd/` holds its timer. `install.sh` asks whether to enable that timer. The timer runs as the user you name. Press enter and it uses the user who ran `sudo`. 
 
-`bin/mediapipeline-status` is the SSH screen. It prints the timer, whether a pass is running, the folder counts, the GPU, and the last errors. `mediapipeline-status -f` redraws every 2 seconds. The encoder row stays `not installed` until that service exists. An encoder log, when it exists, is `/var/log/mediapipeline/encode.log`.
+`bin/mediapipeline-status` is the SSH screen. It prints the timer, whether a pass is running, then Logging (`unprocessed`, `completed`, `failed`, `relog`) and Encoder (`queue`, `completed`, `failed`). `mediapipeline-status -f` redraws every 2 seconds. The encoder stays `not installed` until that service exists. An encoder log, when it exists, is `/var/log/mediapipeline/encode.log`.
 
 ```bash
 sudo /opt/MediaPipeLine/install.sh

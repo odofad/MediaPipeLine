@@ -19,6 +19,7 @@ convert=""
 converted=""
 hevc_root=""
 lock_file=""
+card_suffix=""
 
 usage() {
   echo "usage: mediapipeline-status [-f]" >&2
@@ -43,7 +44,7 @@ conf_get() {
 
 load_conf() {
   local key
-  for key in logged relog recovery error convert converted hevc_root lock_file; do
+  for key in logged relog recovery error convert converted hevc_root lock_file card_suffix; do
     printf -v "$key" '%s' "$(conf_get "$key" || true)"
   done
 }
@@ -145,6 +146,50 @@ timer_line() {
   printf '\n'
 }
 
+logged_split() {
+  local dir="$1" suffix="$2" d base card t
+  logged_open=0
+  logged_done=0
+  logged_open_name=""
+  logged_open_t=0
+  logged_done_name=""
+  logged_done_t=0
+  [[ -n "$suffix" ]] || suffix=".mag.txt"
+  [[ -d "$dir" ]] || { logged_open="missing"; logged_done="missing"; return; }
+  [[ -r "$dir" ]] || { logged_open="unreadable"; logged_done="unreadable"; return; }
+  shopt -s nullglob
+  for d in "$dir"/*/; do
+    [[ -d "$d" ]] || continue
+    base="${d%/}"
+    base="${base##*/}"
+    t="$(stat -c %Y "$d" 2>/dev/null || echo 0)"
+    card="${d%/}/${base}${suffix}"
+    if [[ -f "$card" ]]; then
+      logged_done=$((logged_done + 1))
+      if (( t > logged_done_t )); then
+        logged_done_t=$t
+        logged_done_name=$base
+      fi
+    else
+      logged_open=$((logged_open + 1))
+      if (( t > logged_open_t )); then
+        logged_open_t=$t
+        logged_open_name=$base
+      fi
+    fi
+  done
+  shopt -u nullglob
+}
+
+state_line() {
+  local label="$1" n="$2" newest="${3:-}"
+  if [[ -n "$newest" ]]; then
+    printf '  %-16s %s   %s\n' "$label" "$n" "$newest"
+  else
+    printf '  %-16s %s\n' "$label" "$n"
+  fi
+}
+
 folder_line() {
   local label="$1" dir="$2" kind="${3:-shoots}" n newest
   if [[ "$kind" == files ]]; then
@@ -182,19 +227,19 @@ gpu_lines() {
   done <<<"$line"
 }
 
-encoder_line() {
+encoder_state() {
   local active
   if ! command -v systemctl >/dev/null 2>&1; then
-    echo "  systemctl not found"
+    printf 'systemctl not found'
     return
   fi
   if ! systemctl cat "$ENCODE_UNIT" >/dev/null 2>&1; then
-    echo "  not installed"
+    printf 'not installed'
     return
   fi
   active="$(unit_field "$ENCODE_UNIT" ActiveState)"
   [[ -n "$active" ]] || active="unknown"
-  printf '  %s\n' "$active"
+  printf '%s' "$active"
 }
 
 log_tail() {
@@ -220,28 +265,33 @@ draw() {
   echo "Detection   ${pass}   user ${user}"
   printf '  timer   %s\n' "$(timer_line)"
   echo
-  echo "Folders"
+  echo "Logging"
   if [[ ! -f "$CONF" ]]; then
     echo "  conf missing: $CONF"
   else
-    folder_line "2.Logged" "$logged"
-    folder_line "2.1.Relog" "$relog"
-    folder_line "2.2.Recovery" "$recovery"
-    folder_line "2.3.Error" "$error"
-    folder_line "3.Convert" "$convert"
-    folder_line "4.Converted" "$converted"
-    folder_line "encode out" "$hevc_root" files
+    logged_split "$logged" "$card_suffix"
+    state_line "unprocessed" "$logged_open" "$logged_open_name"
+    state_line "completed" "$logged_done" "$logged_done_name"
+    folder_line "failed" "$error"
+    folder_line "relog" "$relog"
+    if [[ "$(shoot_count "$recovery")" != 0 ]]; then
+      folder_line "recovery" "$recovery"
+    fi
   fi
   echo
-  echo "GPU"
-  gpu_lines
-  echo
-  echo "Encoder"
-  encoder_line
+  echo "Encoder   $(encoder_state)"
+  if [[ -f "$CONF" ]]; then
+    folder_line "queue" "$convert"
+    folder_line "completed" "$converted"
+    state_line "failed" "0"
+  fi
   if [[ -f "$ENCODE_LOG" ]]; then
     echo "Encoder log"
     log_tail "$ENCODE_LOG" 8
   fi
+  echo
+  echo "GPU"
+  gpu_lines
   echo
   echo "Errors   $ERROR_LOG"
   log_tail "$ERROR_LOG" 12
