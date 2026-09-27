@@ -14,8 +14,8 @@ The timer line is enabled or not, the last run, and the next run. The pass is `r
 Logging is the detection pass:
 
 - `unprocessed` is a shoot still in `2.Logged` with no `.mag.txt`.
-- `completed` is a shoot still in `2.Logged` whose card was written and whose colour was resolved. Detection does not move it to `3.Convert`.
-- `failed` is `2.3.Error`. Unknown gamma or gamut put the whole shoot there, card included.
+- `completed` is a shoot still in `2.Logged` whose card was written. Detection does not move it to `3.Convert`. v1 does not move a shoot for colour.
+- `failed` is `2.3.Error`. v1 does not put a shoot there.
 - `relog` is `2.1.Relog`. The folder name, or a media filename, does not start with a real `YYYY_MM_DD_`. That is a mistake from the logging step before detection. The shoot is not probed. A person fixes the names and moves it back to `2.Logged`.
 - `recovery` is printed only when `2.2.Recovery` is not empty.
 

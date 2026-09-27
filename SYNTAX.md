@@ -6,7 +6,7 @@ Two shapes. A file uses one of them. Do not mix them.
 
 ## Assignment
 
-`pipe.conf` and `camera-rules.conf`.
+`pipe.conf`.
 
 ```text
 key = value
@@ -16,9 +16,7 @@ The first `=` splits the key from the value. Space around the key and the value 
 
 A line whose first non-space character is `#` is a comment. A blank line is ignored. If the value begins and ends with `"`, that one pair of quotes is removed. Quote a value only when you want that. A path does not need quotes.
 
-`pipe.conf` skips a line that is not an assignment. It also skips a key it does not use, so a treatment line can sit in the same file. `camera-rules.conf` rejects a line that is not an assignment, and it rejects a key that version 1 does not list.
-
-A key may be repeated only where that file says so. In `camera-rules.conf` the list keys may be repeated, one entry per line. Every other key is once per rule.
+`pipe.conf` skips a line that is not an assignment. It also skips a key it does not use.
 
 ## Card
 
@@ -40,15 +38,11 @@ orphan: clip_002.R3D
 
 clip: clip_001.R3D
 spans: clip_002.R3D clip_003.R3D
-camera: Panasonic
 width: 1920
 height: 1080
 frame_rate: 25/1
 duration: 12.00
 codec: h264
-gamma: V-Log
-gamut: V-Gamut
-range: unknown
 audio: pcm_s16le x 2
 timecode: 01:00:00:00
 ```
@@ -61,9 +55,7 @@ Header, in this order: `folder`, `date`, then `copyright` and `owner` only when 
 
 `orphan:` lines follow the header when a RED span has no `_001` in the folder. Then a blank line.
 
-Each clip is one block. Blocks are separated by one blank line. The keys, in this order, are `clip`, `spans` only when the clip has spans, `camera`, `width`, `height`, `frame_rate`, `duration`, `codec`, `gamma`, `gamut`, `range`, `audio`, `timecode`. `range` is `unknown` until a script has a real value for it.
-
-`camera` is the word a camera rule sets, or `other` when no rule matches. `gamma` and `gamut` are the camera's own words. They are not renamed to a treatment on the card. The treatment is the `gamma.` or `gamut.` line in `pipe.conf`. The key is that card word, capitals included. `gamma.HD` matches `gamma: HD`. It does not match `hd`.
+Each clip is one block. Blocks are separated by one blank line. The keys, in this order, are `clip`, `spans` only when the clip has spans, `width`, `height`, `frame_rate`, `duration`, `codec`, `audio`, `timecode`. v1 does not write `camera`, `gamma`, `gamut`, or `range`. Colour detection is on the `research` branch.
 
 ## Names
 
@@ -80,7 +72,7 @@ An extension list is dotted, lowercase, and space-separated: `.mxf .mov .mp4`. D
 `/var/log/mediapipeline/detect.log`. One line:
 
 ```text
-2026-09-27T11:54:00+02:00 unresolved gamma CINE-D 2026_04_01_New_CX350
+2026-09-27T11:54:00+02:00 relog 2026_04_01_New_CX350
 ```
 
 `date -Iseconds`, one space, then words separated by one space. A later script may split this line. A normal card, a settle skip, and an already-carded skip are not logged.
@@ -93,13 +85,7 @@ The verbs:
 | `relog-refused <folder>` | A folder of that name was already in `2.1.Relog`. |
 | `relog-failed <folder>` | The move failed. |
 | `no-media <folder>` | The folder name is a real date and no media file is directly in it. The card is not written. Logged once. |
-| `unresolved gamma unknown <folder>` | A clip had no gamma word. `gamut` is the same shape. |
-| `unresolved gamma <word> <folder>` | The word was read and its treatment is missing or `unknown`. |
-| `error <folder>` | The shoot was moved to `2.3.Error`. |
-| `error-refused <folder>` | A folder of that name was already in `2.3.Error`. |
-| `error-failed <folder>` | The move failed. |
-| `redline-missing <folder> <clip>` | The file is `.r3d` and `redline` was not found. The pass continues. |
-| `conf-write-failed <gamma.word> <folder>` | The new treatment line could not be appended. |
+| `redline-missing <folder> <clip>` | The file is `.r3d` and `redline` was not found. The pass continues and the clip is still carded. |
 | `config missing <key>` | A required `pipe.conf` key is empty. |
 | `settle_seconds is not a number` | `settle_seconds` is not digits. |
 | `logged folder missing <path>` | `logged` is not a directory. |
@@ -157,9 +143,7 @@ The tags, in this order, are `exif.Make`, `exif.Model`, `exif.DeviceManufacturer
 
 ## Camera rules
 
-`camera-rules.conf` uses the assignment line, then adds three rules of its own. `version = 1` comes before the first rule. A rule starts at `family` and ends at the next `family`. The closed lists for `applies`, `read`, `match`, and the other keys are the header of that file. `mediapipeline-camera-rules` checks them. Detection does not read the file yet.
-
-A new key in that file is a new version, written here and in that header in the same commit.
+Colour rules and camera profiles are not in v1. They are on the `research` branch.
 
 ## Folders and scripts
 

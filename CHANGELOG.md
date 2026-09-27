@@ -2,6 +2,12 @@
 
 Newest first.
 
+## 2026-09-27 — v1 card, colour on research
+
+v1 writes a mag card and does not read colour. A clip block is size, frame rate, duration, codec, audio, and timecode. There is no `camera`, `gamma`, `gamut`, or `range` line. A dated shoot stays in `2.Logged`. It is not moved because a colour word is missing.
+
+`known-cameras.conf`, `camera-rules.conf`, and `mediapipeline-camera-rules` are deleted on `main`. The colour readers and those profiles are on the `research` branch, at the commit this v1 was cut from.
+
 ## 2026-09-27 — house picture is a fallback
 
 This house does not change the format on a camera, so `known-cameras.conf` may list a body that could shoot another picture. A gamma word already read from the file is kept. The block fills the card only when that word is missing. A proxy that misses a log conversion is acceptable. The original is the archive. `ILCE-7RM3` is still not listed. The opened clip says `s-log3-cine` and another report said `rec709`.

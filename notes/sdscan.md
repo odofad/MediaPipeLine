@@ -1,6 +1,6 @@
 # mediapipeline-sdscan
 
-Reads one SD card dump and writes which tags stay the same on every clip, and which tags change. That constant tag is the identifier. A tag that changes with the mode is the picture word. It does not detect. It does not move a file. It does not write a mag card. It does not add a treatment. Detection does not read the report.
+Reads one SD card dump and writes which tags stay the same on every clip, and which tags change. It does not detect. It does not move a file. It does not write a mag card. v1 does not read the report. Colour readers and camera profiles are on the `research` branch.
 
 The command is `mediapipeline-sdscan`. After you pull this tree, install it with `sudo ./install.sh`.
 

@@ -1,10 +1,9 @@
 #!/bin/bash
 # One detection pass. Reads /etc/mediapipeline/pipe.conf.
-# Writes a mag card and stops. Does not encode.
+# Writes a mag card and stops. Does not encode. Does not read colour.
 set -euo pipefail
 
 CONF=/etc/mediapipeline/pipe.conf
-KNOWN=/etc/mediapipeline/known-cameras.conf
 ERROR_LOG=/var/log/mediapipeline/detect.log
 
 logged=""
@@ -14,9 +13,7 @@ settle_seconds=""
 lock_file=""
 card_suffix=""
 media_extensions=""
-sidecar_extensions=""
 ffprobe=""
-exiftool=""
 redline=""
 copyright=""
 owner=""
@@ -33,7 +30,7 @@ system_bin() {
   local name="$1" base
   base="${name##*/}"
   case "$base" in
-    ffmpeg|ffprobe|exiftool)
+    ffmpeg|ffprobe)
       if [[ -x "/usr/bin/${base}" ]]; then
         printf '/usr/bin/%s' "$base"
         return 0
@@ -63,21 +60,18 @@ load_conf() {
       lock_file) lock_file=$val ;;
       card_suffix) card_suffix=$val ;;
       media_extensions) media_extensions=$val ;;
-      sidecar_extensions) sidecar_extensions=$val ;;
       ffprobe) ffprobe=$val ;;
-      exiftool) exiftool=$val ;;
       redline) redline=$val ;;
       copyright) copyright=$val ;;
       owner) owner=$val ;;
     esac
   done < "$CONF"
   local need
-  for need in logged relog error settle_seconds lock_file card_suffix media_extensions sidecar_extensions ffprobe exiftool; do
+  for need in logged relog error settle_seconds lock_file card_suffix media_extensions ffprobe; do
     [[ -n "${!need}" ]] || { log_error "config missing $need"; echo "config missing $need" >&2; exit 1; }
   done
   [[ -n "$redline" ]] || redline="REDline"
   ffprobe="$(system_bin "$ffprobe")"
-  exiftool="$(system_bin "$exiftool")"
   [[ "$settle_seconds" =~ ^[0-9]+$ ]] || { log_error "settle_seconds is not a number"; echo "settle_seconds is not a number" >&2; exit 1; }
 }
 
@@ -122,213 +116,6 @@ read_human_fields() {
       note:*) [[ -z "$note" ]] && note="$(trim "${line#note:}")" ;;
     esac
   done < "$1"
-}
-
-is_panasonic_make() {
-  local manufacturer="$1" model="$2"
-  shopt -s nocasematch
-  local hit=1
-  if [[ "$manufacturer" == *Panasonic* || "$model" == AG-* || "$model" == DC-* || "$model" == *Varicam* ]]; then
-    hit=0
-  fi
-  shopt -u nocasematch
-  return "$hit"
-}
-
-is_sony_make() {
-  local val="$1"
-  [[ -z "$val" ]] && return 1
-  shopt -s nocasematch
-  local hit=1
-  if [[ "$val" == Sony* ]]; then
-    hit=0
-  fi
-  shopt -u nocasematch
-  return "$hit"
-}
-
-is_apple_make() {
-  local val="$1"
-  [[ -z "$val" ]] && return 1
-  shopt -s nocasematch
-  local hit=1
-  if [[ "$val" == Apple* || "$val" == iPhone* ]]; then
-    hit=0
-  fi
-  shopt -u nocasematch
-  return "$hit"
-}
-
-is_dji_make() {
-  local val="$1"
-  [[ -z "$val" ]] && return 1
-  shopt -s nocasematch
-  local hit=1
-  if [[ "$val" == DJI* || "$val" == *DJI* ]]; then
-    hit=0
-  fi
-  shopt -u nocasematch
-  return "$hit"
-}
-
-is_insta_make() {
-  local val="$1"
-  [[ -z "$val" ]] && return 1
-  shopt -s nocasematch
-  local hit=1
-  if [[ "$val" == Insta360* || "$val" == *Insta360* ]]; then
-    hit=0
-  fi
-  shopt -u nocasematch
-  return "$hit"
-}
-
-parse_panasonic() {
-  local text="$1" line
-  pana_mfr="" pana_model="" pana_gamma="" pana_gamut=""
-  [[ -n "$text" ]] || return 0
-  while IFS= read -r line; do
-    [[ "$line" =~ \<(Manufacturer|ModelName|CaptureGamma|CaptureGamut)\>(.*) ]] || continue
-    case "${BASH_REMATCH[1]}" in
-      Manufacturer) pana_mfr=${BASH_REMATCH[2]} ;;
-      ModelName) pana_model=${BASH_REMATCH[2]} ;;
-      CaptureGamma) pana_gamma=${BASH_REMATCH[2]} ;;
-      CaptureGamut) pana_gamut=${BASH_REMATCH[2]} ;;
-    esac
-  done <<< "$text"
-}
-
-parse_sony_items() {
-  local text="$1" line name val
-  sony_gamma="" sony_gamut="" sony_make="" sony_model=""
-  [[ -n "$text" ]] || return 0
-  while IFS= read -r line; do
-    [[ "$line" =~ Item\ name=\"([^\"]+)\"\ value=\"([^\"]+)\" ]] || continue
-    name="${BASH_REMATCH[1]}"
-    val="${BASH_REMATCH[2]}"
-    case "$name" in
-      CaptureGammaEquation) sony_gamma=$val ;;
-      CaptureColorPrimaries) sony_gamut=$val ;;
-      Make|Manufacturer)
-        if is_sony_make "$val"; then
-          sony_make=$val
-        fi
-        ;;
-      Model|ModelName|CameraModelName)
-        if is_sony_make "$val"; then
-          sony_make=$val
-        else
-          sony_model=$val
-        fi
-        ;;
-    esac
-  done <<< "$text"
-}
-
-grep_panasonic() {
-  grep -a -o -E '<(Manufacturer|ModelName|CaptureGamma|CaptureGamut)>[^<]+' "$1" 2>/dev/null || true
-}
-
-grep_sony() {
-  grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manufacturer|Model|ModelName|CameraModelName)" value="[^"]+"' "$1" 2>/dev/null || true
-}
-
-# AX53 writes this instead of Item name="CaptureGammaEquation".
-# modelName is the known-cameras key when that equation is absent.
-grep_sony_device() {
-  grep -a -o -E '<Device[[:space:]][^>]*>' "$1" 2>/dev/null || true
-}
-
-parse_sony_device() {
-  local text="$1" line
-  [[ -n "$text" ]] || return 0
-  while IFS= read -r line; do
-    if [[ -z "$sony_make" && "$line" =~ manufacturer=\"([^\"]*)\" ]]; then
-      if is_sony_make "${BASH_REMATCH[1]}"; then
-        sony_make=${BASH_REMATCH[1]}
-      fi
-    fi
-    if [[ "$line" =~ modelName=\"([^\"]*)\" ]]; then
-      [[ -n "${BASH_REMATCH[1]}" ]] && sony_model=${BASH_REMATCH[1]}
-    fi
-  done <<< "$text"
-}
-
-# MXF stores CaptureGammaEquation as a 16-byte SMPTE label, not as XML text.
-# ExifTool prints the label and hides it unless -u is set. -fast stays in the header.
-# The label below was read on an opened FS5. RDD 18 names it ITU-R BT.709.
-# The Sony XML spelling of that curve is rec709. Other labels are not translated.
-# A private acquisition tail such as 0E06040101010601 is a different field and is not read.
-sony_label_word() {
-  local raw="$1" norm
-  raw="$(trim "$raw")"
-  [[ -z "$raw" || "$raw" == -* ]] && return 0
-  norm="${raw//[[:space:].:-]/}"
-  norm="${norm,,}"
-  case "$norm" in
-    060e2b34040101010401010101020000) printf '%s' rec709 ;;
-    *) printf '%s' "$raw" ;;
-  esac
-}
-
-read_sony_label() {
-  local file="$1" raw
-  sony_gamma=""
-  command -v "$exiftool" >/dev/null 2>&1 || return 0
-  if command -v timeout >/dev/null 2>&1; then
-    raw="$(timeout --signal=TERM 25 "$exiftool" -u -fast -m -s3 -CaptureGammaEquation "$file" 2>/dev/null || true)"
-  else
-    raw="$("$exiftool" -u -fast -m -s3 -CaptureGammaEquation "$file" 2>/dev/null || true)"
-  fi
-  sony_gamma="$(sony_label_word "$raw")"
-}
-
-# ColorPrimaries on the same picture descriptor is raw bytes. ExifTool prints
-# them only with -b. The one label below is the public BT.709 primaries, read
-# on the opened FS5. Anything else, including a Sony private label, stays empty.
-# ColorimetryCode is the matrix and is not read.
-sony_primaries_word() {
-  local hex="$1"
-  [[ "$hex" == "060e2b34040101060401010103030000" ]] && printf '%s' rec709
-}
-
-read_sony_primaries() {
-  local file="$1" tmp hex
-  sony_gamut=""
-  command -v "$exiftool" >/dev/null 2>&1 || return 0
-  tmp=$(mktemp)
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=TERM 25 "$exiftool" -u -fast -m -s3 -b -ColorPrimaries "$file" > "$tmp" 2>/dev/null || true
-  else
-    "$exiftool" -u -fast -m -s3 -b -ColorPrimaries "$file" > "$tmp" 2>/dev/null || true
-  fi
-  # The label ends in two zero bytes. A shell variable drops them, so this stays a file.
-  hex="$(od -An -tx1 "$tmp" | tr -d ' \n')"
-  rm -f "$tmp"
-  sony_gamut="$(sony_primaries_word "$hex")"
-}
-
-find_sidecar() {
-  local file="$1" shoot="$2"
-  local stem stemlower place cand base lower ext
-  stem="${file##*/}"
-  stem="${stem%.*}"
-  stemlower="${stem,,}"
-  for place in "${file%/*}" "$shoot/CLIP"; do
-    [[ -d "$place" ]] || continue
-    for cand in "$place"/*; do
-      [[ -f "$cand" ]] || continue
-      base="${cand##*/}"
-      lower="${base,,}"
-      for ext in $sidecar_extensions; do
-        if [[ "$lower" == "${stemlower}${ext}" ]]; then
-          printf '%s' "$cand"
-          return 0
-        fi
-      done
-    done
-  done
-  return 1
 }
 
 fill_picture_ffprobe() {
@@ -398,7 +185,7 @@ fill_picture_ffprobe() {
 
 fill_picture_red() {
   local text="$1" line key val frames="" fps=""
-  width="" height="" frame_rate="" duration="" timecode="" gamma="" gamut=""
+  width="" height="" frame_rate="" duration="" timecode=""
   codec_name="REDCODE"
   audio=""
   while IFS= read -r line; do
@@ -407,14 +194,11 @@ fill_picture_red() {
     key="$(trim "${BASH_REMATCH[1]}")"
     val="$(trim "${BASH_REMATCH[2]}")"
     [[ -z "$val" ]] && continue
-    # A line may itself end with "Key: value". Keep the last field.
     if [[ "$val" == *": "* ]]; then
       key="$(trim "${val%%:*}")"
       val="$(trim "${val#*:}")"
     fi
     case "$key" in
-      "Gamma Curve"|"Gamma Space") gamma=$val ;;
-      "Color Space"|"ColorSpace") gamut=$val ;;
       "Frame Width"|"Image Width") width=$val ;;
       "Frame Height"|"Image Height") height=$val ;;
       FPS|"Frame Rate"|"Record FPS"|"Record Framerate") fps=$val ;;
@@ -437,199 +221,21 @@ fill_picture_red() {
   fi
 }
 
-classify_other() {
-  local file="$1" line val
-  camera="other"
-  gamma=""
-  gamut=""
-  command -v "$exiftool" >/dev/null 2>&1 || return 0
-  local exif_tmp vals=()
-  exif_tmp=$(mktemp)
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=TERM 25 "$exiftool" -fast -m -s -Make -Model -DeviceManufacturer -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
-  else
-    "$exiftool" -fast -m -s -Make -Model -DeviceManufacturer -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
-  fi
-  while IFS= read -r line; do
-    [[ "$line" =~ ^[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(.*)$ ]] || continue
-    val="$(trim "${BASH_REMATCH[1]}")"
-    [[ -n "$val" ]] && vals+=("$val")
-  done < "$exif_tmp"
-  rm -f "$exif_tmp"
-  local item
-  for item in "${vals[@]+"${vals[@]}"}"; do
-    if is_panasonic_make "$item" "$item"; then
-      camera="Panasonic"
-      return 0
-    fi
-  done
-  for item in "${vals[@]+"${vals[@]}"}"; do
-    if is_sony_make "$item"; then
-      camera="Sony"
-      return 0
-    fi
-  done
-  for item in "${vals[@]+"${vals[@]}"}"; do
-    if is_apple_make "$item"; then
-      camera="Apple"
-      return 0
-    fi
-  done
-  for item in "${vals[@]+"${vals[@]}"}"; do
-    if is_dji_make "$item"; then
-      camera="DJI"
-      return 0
-    fi
-  done
-  for item in "${vals[@]+"${vals[@]}"}"; do
-    if is_insta_make "$item"; then
-      camera="Insta360"
-      return 0
-    fi
-  done
-}
-
-lookup_known_model() {
-  local want="${1,,}" line key val
-  local cur_m="" cur_g="" cur_u="" cur_c=""
-  known_hit_camera="" known_hit_gamma="" known_hit_gamut=""
-  [[ -f "$KNOWN" ]] || return 1
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="$(trim "$line")"
-    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
-    key="$(trim "${line%%=*}")"
-    val="$(trim "${line#*=}")"
-    if [[ "$key" == model ]]; then
-      if [[ -n "$cur_m" && "${cur_m,,}" == "$want" && -n "$cur_g" && -n "$cur_u" && -n "$cur_c" ]]; then
-        known_hit_camera=$cur_c
-        known_hit_gamma=$cur_g
-        known_hit_gamut=$cur_u
-        return 0
-      fi
-      cur_m=$val
-      cur_g=""
-      cur_u=""
-      cur_c=""
-    elif [[ -n "$cur_m" ]]; then
-      case "$key" in
-        gamma) cur_g=$val ;;
-        gamut) cur_u=$val ;;
-        camera) cur_c=$val ;;
-      esac
-    fi
-  done < "$KNOWN"
-  if [[ -n "$cur_m" && "${cur_m,,}" == "$want" && -n "$cur_g" && -n "$cur_u" && -n "$cur_c" ]]; then
-    known_hit_camera=$cur_c
-    known_hit_gamma=$cur_g
-    known_hit_gamut=$cur_u
-    return 0
-  fi
-  return 1
-}
-
-# The house picture for this body. A gamma word already read from the file is kept.
-# The block fills the card only when that word is missing.
-use_known_model() {
-  local model="$1"
-  [[ -z "$model" ]] && return 1
-  [[ -n "$gamma" ]] && return 1
-  lookup_known_model "$model" || return 1
-  camera=$known_hit_camera
-  gamma=$known_hit_gamma
-  gamut=$known_hit_gamut
-  return 0
-}
-
-apply_known_camera() {
-  local file="$1" line val
-  [[ -n "$gamma" ]] && return 0
-  [[ -f "$KNOWN" ]] || return 0
-  command -v "$exiftool" >/dev/null 2>&1 || return 0
-  local exif_tmp
-  exif_tmp=$(mktemp)
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=TERM 25 "$exiftool" -fast -m -s -Model -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
-  else
-    "$exiftool" -fast -m -s -Model -DeviceModelName -CameraModelName "$file" > "$exif_tmp" 2>/dev/null || true
-  fi
-  while IFS= read -r line; do
-    [[ "$line" =~ ^[A-Za-z0-9]+[[:space:]]*:[[:space:]]*(.*)$ ]] || continue
-    val="$(trim "${BASH_REMATCH[1]}")"
-    [[ -z "$val" ]] && continue
-    if lookup_known_model "$val"; then
-      camera=$known_hit_camera
-      gamma=$known_hit_gamma
-      gamut=$known_hit_gamut
-      rm -f "$exif_tmp"
-      return 0
-    fi
-  done < "$exif_tmp"
-  rm -f "$exif_tmp"
-}
-
 probe_red() {
   local file="$1" text
-  camera="RED"
-  gamma="" gamut=""
-  text=""
+  width="" height="" frame_rate="" duration="" timecode="" codec_name="" audio=""
   if command -v "$redline" >/dev/null 2>&1; then
     text=$("$redline" --i "$file" --printMeta 1 2>&1 || true)
     fill_picture_red "$text"
   else
-    width="" height="" frame_rate="" duration="" timecode=""
     codec_name="REDCODE"
-    audio=""
     echo "redline not found: ${file##*/}" >&2
     log_error "redline-missing ${base:-} ${file##*/}"
   fi
 }
 
 probe_other_media() {
-  local file="$1" shoot="$2" text side
-  camera="" gamma="" gamut=""
-  sony_gamma="" sony_gamut="" sony_make="" sony_model=""
-  text="$(grep_panasonic "$file")"
-  parse_panasonic "$text"
-  if [[ -n "$pana_gamma" || -n "$pana_gamut" ]] || is_panasonic_make "$pana_mfr" "$pana_model"; then
-    camera="Panasonic"
-    gamma=$pana_gamma
-    gamut=$pana_gamut
-    if [[ -z "$gamma" ]]; then
-      side="$(find_sidecar "$file" "$shoot" || true)"
-      if [[ -n "$side" ]]; then
-        parse_panasonic "$(grep_panasonic "$side")"
-        [[ -z "$gamma" ]] && gamma=$pana_gamma
-        [[ -z "$gamut" ]] && gamut=$pana_gamut
-      fi
-    fi
-  elif [[ -z "$text" ]]; then
-    parse_sony_items "$(grep_sony "$file")"
-    parse_sony_device "$(grep_sony_device "$file")"
-    if [[ -n "$sony_gamma" || -n "$sony_make" || -n "$sony_model" ]]; then
-      camera="Sony"
-      gamma=$sony_gamma
-      gamut=$sony_gamut
-    else
-      read_sony_label "$file"
-      if [[ -n "$sony_gamma" ]]; then
-        camera="Sony"
-        gamma=$sony_gamma
-        read_sony_primaries "$file"
-        gamut=$sony_gamut
-      else
-        classify_other "$file"
-      fi
-    fi
-  else
-    classify_other "$file"
-  fi
-  if [[ -n "${sony_model:-}" ]]; then
-    use_known_model "$sony_model" || true
-  fi
-  if [[ -z "$gamma" ]]; then
-    apply_known_camera "$file"
-  fi
-  [[ -n "$camera" ]] || camera="other"
+  local file="$1"
   fill_picture_ffprobe "$file"
 }
 
@@ -638,86 +244,14 @@ write_block() {
   {
     printf 'clip: %s\n' "$clip"
     [[ -n "$spans" ]] && printf 'spans: %s\n' "$spans"
-    printf 'camera: %s\n' "$(known "$camera")"
     printf 'width: %s\n' "$(known "$width")"
     printf 'height: %s\n' "$(known "$height")"
     printf 'frame_rate: %s\n' "$(known "$frame_rate")"
     printf 'duration: %s\n' "$(known "$duration")"
     printf 'codec: %s\n' "$(known "$codec_name")"
-    printf 'gamma: %s\n' "$(known "$gamma")"
-    printf 'gamut: %s\n' "$(known "$gamut")"
-    printf 'range: unknown\n'
     printf 'audio: %s\n' "$(known "$audio")"
     printf 'timecode: %s\n' "$(known "$timecode")"
   } >> "$card_tmp"
-  remember_tag gamma "$gamma" "$camera"
-  remember_tag gamut "$gamut" "$camera"
-  mark_if_unresolved "$gamma" gamma
-  mark_if_unresolved "$gamut" gamut
-}
-
-conf_defines() {
-  local kind="$1" word="$2" line key
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="$(trim "$line")"
-    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
-    key="$(trim "${line%%=*}")"
-    [[ "$key" == "${kind}.${word}" ]] && return 0
-  done < "$CONF"
-  return 1
-}
-
-remember_tag() {
-  local kind="$1" word camera="$3" tag
-  word="$(trim "${2:-}")"
-  [[ -z "$word" || "$word" == unknown ]] && return 0
-  [[ "$word" == *$'\n'* || "$word" == *=* ]] && return 0
-  tag="${kind}.${word}"
-  [[ -n "${remembered[$tag]:-}" ]] && return 0
-  if conf_defines "$kind" "$word"; then
-    remembered[$tag]=1
-    return 0
-  fi
-  if ! grep -q '^# Seen on a card' "$CONF"; then
-    printf '\n# Seen on a card and not defined yet. Change unknown to a treatment. The encoder skips unknown.\n' >> "$CONF" \
-      || { log_error "conf-write-failed ${tag} ${base:-}"; echo "could not record ${tag}" >&2; return 0; }
-  fi
-  printf '%s = unknown\n' "$tag" >> "$CONF" \
-    || { log_error "conf-write-failed ${tag} ${base:-}"; echo "could not record ${tag}" >&2; return 0; }
-  remembered[$tag]=1
-  echo "undefined ${kind}: ${word}"
-}
-
-conf_value() {
-  local kind="$1" word="$2" line key val
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="$(trim "$line")"
-    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
-    key="$(trim "${line%%=*}")"
-    [[ "$key" == "${kind}.${word}" ]] || continue
-    val="$(trim "${line#*=}")"
-    if [[ "$val" == \"*\" && "$val" == *\" ]]; then
-      val="${val:1:${#val}-2}"
-    fi
-    printf '%s' "$val"
-    return 0
-  done < "$CONF"
-  return 1
-}
-
-mark_if_unresolved() {
-  local word value kind="$2"
-  word="$(trim "${1:-}")"
-  if [[ -z "$word" || "$word" == unknown ]]; then
-    folder_unresolved=1
-    log_error "unresolved ${kind} unknown ${base}"
-    return 0
-  fi
-  value="$(conf_value "$kind" "$word" || true)"
-  if [[ -z "$value" || "$value" == unknown ]]; then
-    folder_unresolved=1
-    log_error "unresolved ${kind} ${word} ${base}"
-  fi
 }
 
 process_folder() {
@@ -783,8 +317,7 @@ process_folder() {
     fi
   fi
 
-  local prefix num stem
-  folder_unresolved=0
+  local prefix num
   for f in "${media[@]}"; do
     name="${f##*/}"
     if has_ext "$name" ".r3d" && [[ "$name" =~ ^(.+)_([0-9]{3})\.[Rr]3[Dd]$ ]]; then
@@ -830,7 +363,7 @@ process_folder() {
     printf '\n' >> "$card_tmp"
   fi
 
-  local sorted clip spans="" first=1 list
+  local sorted spans="" first=1 list
   list=$(mktemp)
   if [[ ${#rows[@]} -gt 0 ]]; then
     printf '%s\0' "${rows[@]}" | sort -z > "$list"
@@ -851,7 +384,7 @@ process_folder() {
       probe_red "$sorted"
       write_block "$name"
     else
-      probe_other_media "$sorted" "$dir"
+      probe_other_media "$sorted"
       write_block "$name"
     fi
   done < "$list"
@@ -860,19 +393,6 @@ process_folder() {
   mv -f "$card_tmp" "$card"
   card_tmp=""
   echo "card: $base"
-  if [[ "$folder_unresolved" -eq 1 ]]; then
-    local dest="${error}/${base}"
-    if [[ -e "$dest" ]]; then
-      echo "error refused: $base"
-      log_error "error-refused ${base}"
-    elif mv "$dir" "$dest"; then
-      echo "error: $base"
-      log_error "error ${base}"
-    else
-      echo "error failed: $base" >&2
-      log_error "error-failed ${base}"
-    fi
-  fi
 }
 
 main() {
@@ -881,7 +401,6 @@ main() {
   mkdir -p "$(dirname "$lock_file")" "$relog" "$error"
   card_tmp=""
   trap '[[ -n "${card_tmp:-}" ]] && rm -f "$card_tmp"' EXIT
-  declare -gA remembered=()
   exec 9>"$lock_file"
   if ! flock -n 9; then
     echo "detection already running"

@@ -9,7 +9,7 @@ Year_Month_Day_Place_Persons_Content_CameraModel_ClipNumber_OptionalSubInfo
 2020_11_27_Boston_WiumBrent_NgatiLionPride_FS5_01_SingleFemaleWithMale
 ```
 
-The camera model sits before the clip number. Optional sub-info can follow the number, so the last field is not the camera. The folder name is a separate habit. The archivist ends that with the camera. Neither word is read yet. This house does not change the format on a body, so those names are reliable enough to look up a house picture when the file itself has no gamma word. A word in the file is kept. A proxy that misses a log conversion is acceptable. The original is the archive.
+The camera model sits before the clip number. Optional sub-info can follow the number, so the last field is not the camera. The folder name is a separate habit. The archivist ends that with the camera. v1 does not read either word.
 
 The transcode is HEVC in an MP4, same name, new extension. The policy's size check is 30–50% of the camera original. High movement is allowed to land higher. The CRF is a camera class, not a gamma:
 

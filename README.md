@@ -1,34 +1,31 @@
 # MediaPipeLine
 
-The archive pipeline. Camera originals land in a shoot folder. The picture is named from the camera's own words. An encode happens later, and only when that name already has a treatment.
+The archive pipeline. Camera originals land in a shoot folder. v1 writes a mag card for that folder and stops. It does not read colour. Colour detection and the camera profiles are on the `research` branch.
 
-The card keeps the camera's gamma and gamut. It does not rename them. `pipe.conf` says what the encoder does with each word. A word with no treatment is not encoded. A missing word is not filled in as Rec.709.
+The card records the clip, its spans, and the picture ffprobe can see: size, frame rate, duration, codec, audio, and timecode. It does not record a camera, a gamma, or a gamut.
 
 The master copy is this tree. `install.sh` puts the scripts into the system locations. Archive and encode paths stay in the live conf on that machine. The shipped defaults are under `/var/lib/mediapipeline/`.
 
 ## Where it stands
 
-Detection runs on a timer. One pass writes a mag card and stops. A folder name that is not a real date goes to Relog. Unknown colour goes to Error. A shoot whose colour is resolved stays in Logged. Nothing is moved to Convert, and nothing is encoded.
+Detection runs on a timer. One pass writes a mag card and stops. A folder name that is not a real date goes to Relog. A dated folder with media stays in Logged, card and all. Nothing is moved for colour. Nothing is moved to Convert, and nothing is encoded.
 
-The cameras detection can already read are RED, Panasonic, and the Sony bodies that write `CaptureGammaEquation`. REDline is not part of the install. The install warns when it is missing. A machine without it still reads every other camera. A RED clip on that machine has no gamma word and goes to Error. `camera-rules.conf` is version 1 of that list. It says where a camera writes its word. It does not say what the encoder does with it. Detection does not read the file yet. The readers in the script are still what runs. `mediapipeline-camera-rules` only checks the grammar.
+REDline is not part of the install. The install warns when it is missing. A `.r3d` on that machine is still carded. The codec line is `REDCODE`, and the picture fields are empty until REDline is there.
 
 `mediapipeline-status` reports the logging pass and the encoder. The encoder is not installed.
 
-`mediapipeline-camscan` opens one file in a mag and writes a report. It does not move the folder and it does not write a card. A failed tool is recorded as `failed`, not as `none`. A file under 1 MB is skipped. That report is how an unknown camera gets a rule. A body that stores no gamma word is listed in `known-cameras.conf` instead. `FDR-AX53` is `rec709`. `iPhone 17 Pro Max` is `HLG` and `BT.2020`.
-
-`mediapipeline-sdscan` reads one SD card dump and writes which tags stay the same on every clip. It does not move a file and it does not write a card. That report is how a test card becomes an identifier.
+`mediapipeline-camscan` and `mediapipeline-sdscan` are research probes. They do not write a card and they do not move a folder. The colour readers that used those reports are on `research`, not in v1.
 
 ## Where it is going
 
-A camera that still fails gets a rule only after its report shows the tag. Detection then reads the rule file instead of the readers written into the script. The encoder comes after that, and only for a treatment that is already decided. `rec709-as-is` is the decided case: the picture is already HD, so it is not converted. Every other treatment is a name. The filter or LUT for it is not chosen yet.
+Colour comes back from the `research` branch when a reader is settled. The encoder comes after that. v1 does not choose a CRF or a LUT.
 
 ## Tree
 
 ```text
 MediaPipeLine/
   install.sh          copies this tree into the system locations
-  pipe.conf           shipped paths, tunables, extensions, and treatments
-  camera-rules.conf   where a camera writes its gamma word
+  pipe.conf           shipped paths, tunables, and extensions
   SYNTAX.md           the line shapes the conf, the card, the log, a camscan report, and an sdscan report share
   bin/                the scripts
   systemd/            the detection timer

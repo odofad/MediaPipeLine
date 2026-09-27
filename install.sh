@@ -72,13 +72,6 @@ if [[ ! -f "${CONF_DIR}/pipe.conf" ]]; then
 fi
 echo "updated ${CONF_DIR}/pipe.conf.default"
 
-if [[ ! -f "${ROOT}/known-cameras.conf" ]]; then
-  echo "Missing ${ROOT}/known-cameras.conf" >&2
-  exit 1
-fi
-install -m 644 "${ROOT}/known-cameras.conf" "${CONF_DIR}/known-cameras.conf"
-echo "updated ${CONF_DIR}/known-cameras.conf"
-
 conf_get() {
   local key="$1" line val
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -305,5 +298,5 @@ echo "Status screen: ${PREFIX}/mediapipeline-status"
 redline_bin="$(conf_get redline || true)"
 [[ -n "${redline_bin}" ]] || redline_bin="REDline"
 if ! command -v "${redline_bin}" >/dev/null 2>&1; then
-  echo "warning: ${redline_bin} is not on PATH. RED is optional. Install REDline by hand on a machine that logs .r3d. Other cameras do not need it. A .r3d without it is gamma unknown."
+  echo "warning: ${redline_bin} is not on PATH. RED picture fields need it. A .r3d without it is still carded. The codec line is REDCODE."
 fi

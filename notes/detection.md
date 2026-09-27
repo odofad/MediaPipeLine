@@ -29,72 +29,25 @@ For each child folder:
 4. **Already carded.** If `<folder><card_suffix>` exists and every media file is older than that card, skip the folder. If a media file is newer than the card, the card is rebuilt. This runs after the name gate, so a bad name cannot hide behind an old card.
 5. **Clips.** Each media file becomes one card block, except a RED span.
 6. **Card.** Write the card to a temporary file in the shoot folder and rename it over `<folder><card_suffix>` only when the whole folder has been read.
-7. **Unknown colour.** If any clip's gamma or gamut is the word `unknown`, or the conf treatment for that word is `unknown`, move the whole folder to `2.3.Error`. The card goes with it. If a folder of that name is already there, the move is refused and the folder stays in `logged`. A defined treatment, including `rec709-as-is`, stays in `logged`.
 
-A bad name goes to `2.1.Relog`. An undefined gamma or gamut goes to `2.3.Error`. Those are the only moves.
+A bad name goes to `2.1.Relog`. That is the only move. v1 does not read colour, so it does not move a shoot to `2.3.Error`.
 
-Errors are appended to `/var/log/mediapipeline/detect.log`. The path is not in `pipe.conf`. This script does not rotate or summarise that file. A normal card, a settle skip, and an already-carded skip are not logged. The lines a later script can read are `relog`, `relog-refused`, `relog-failed`, `no-media`, `unresolved`, `error`, `error-refused`, `error-failed`, `redline-missing`, and `conf-write-failed`.
+Errors are appended to `/var/log/mediapipeline/detect.log`. The path is not in `pipe.conf`. This script does not rotate or summarise that file. A normal card, a settle skip, and an already-carded skip are not logged. The lines a later script can read are `relog`, `relog-refused`, `relog-failed`, `no-media`, and `redline-missing`.
 
 ```text
-2026-09-27T11:54:00+02:00 unresolved gamma CINE-D 2026_04_01_New_CX350
-2026-09-27T11:54:00+02:00 unresolved gamut NEW-GAMUT 2026_04_01_New_CX350
-2026-09-27T11:54:00+02:00 error 2026_04_01_New_CX350
+2026-09-27T11:54:00+02:00 no-media 2026_04_01_New_CX350
+2026-09-27T11:54:00+02:00 redline-missing 2026_04_01_New_CX350 clip_001.R3D
 ```
 
-## Camera rules
-
-Where a camera writes its word is `camera-rules.conf`. The grammar is version 1, in the header of that file. `mediapipeline-camera-rules` checks the file. It does not probe a clip.
-
-This script does not read that file yet. The steps below are still what runs. Change a reader here and change the rule in the same commit. See [camera-rules.md](camera-rules.md).
-
-The archivist ends the folder name with the camera. A clip name is longer. The house pattern is `Year_Month_Day_Place_Persons_Content_CameraModel_ClipNumber_OptionalSubInfo`, as in `2020_11_27_Boston_WiumBrent_NgatiLionPride_FS5_01_SingleFemaleWithMale`. The camera is the field before the clip number, not whatever is last. Detection does not read either word yet. The word can name the body when the file itself has none. It cannot choose the gamma. An FS5, an FS7, and an A7 shoot more than one picture. A mixed mag is still a logging problem. The folder may say A7 while one clip in it is an FX6. See [archive.md](archive.md).
+Colour detection and the camera profiles are on the `research` branch. v1 does not read a gamma word, a gamut, a container colour tag, or a camera name from the file or the folder.
 
 ## Clip identity
 
-`.r3d` is RED before any grep. The clip id is the filename without the final `_NNN`. Only `_001` is a row. `_002` and higher are spans of that `_001` and are not probed. Their names are listed on the `_001` block. A span with no `_001` in the folder is an orphan line on the card. It is not given a gamma.
+`.r3d` is grouped as a RED clip before `ffprobe`. The clip id is the filename without the final `_NNN`. Only `_001` is a row. `_002` and higher are spans of that `_001` and are not probed. Their names are listed on the `_001` block. A span with no `_001` in the folder is an orphan line on the card.
 
-Any other media file is probed in this order. The first hit wins. A later probe is not allowed to replace it.
+Every other media file is one row. `ffprobe` fills width, height, frame rate, duration, codec, audio, and timecode. It is not asked for colour.
 
-1. **Panasonic grep** on the media file:
-
-```bash
-grep -a -o -E '<(Manufacturer|ModelName|CaptureGamma|CaptureGamut)>[^<]+' "$file"
-```
-
-A Panasonic make is a `Manufacturer` containing `Panasonic`, or a `ModelName` starting with `AG-` or `DC-`, or a `ModelName` containing `Varicam`.
-
-2. **Same-name sidecar**, only when that grep found a Panasonic make and no `CaptureGamma`. The sidecar must be the same basename with an extension from `sidecar_extensions`, beside the file or in a `CLIP` directory inside the shoot folder. Same grep. A different filename is left alone.
-3. **Stop as Panasonic** when the make was found and neither the file nor the same-name sidecar has `CaptureGamma`. Gamma and gamut are `unknown`. The Sony grep is not run.
-4. **Sony grep**, only when the file had no Panasonic XML at all. Two shapes. The `Item name=` shape:
-
-```bash
-grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manufacturer|Model|ModelName|CameraModelName)" value="[^"]+"' "$file"
-```
-
-And the `Device` shape the AX53 actually writes:
-
-```bash
-grep -a -o -E '<Device[[:space:]][^>]*>' "$file"
-```
-
-`manufacturer="Sony"` is the make. `modelName` is the model. It is not thrown away for failing the make test. A Sony make is `CaptureGammaEquation` present, or a make string `Sony`. The word `Sony` is only accepted as the make, not as a hit anywhere in the file. `ILME-` and `PXW-` in the rule file are not matched by this script yet.
-5. **Known camera from that model**, when `modelName` or an Item model was read and the clip still has no gamma word. The file is `/etc/mediapipeline/known-cameras.conf`. This house does not change the format on a camera, so a block is the house picture even if the body could shoot another one. A gamma word already read from the file is kept. The block does not replace it. `FDR-AX53` has no equation, so the block supplies `rec709` and `rec709`. This does not use ExifTool. A proxy that misses a log conversion is acceptable. The camera original is the archive.
-6. **Sony MXF label**, only when that grep found no Sony item and no `Device` tag. The binary is `exiftool` from the conf. The gamma command is `exiftool -u -fast -m -s3 -CaptureGammaEquation` on the real file, stopped after 25 seconds when `timeout` exists. `-u` is required. Without it, ExifTool hides this tag. `-fast` stays in the header. The label `060e2b34.0401.0101.04010101.01020000` is written as `rec709`. Any other value is copied as printed. This was read on the opened FS5. It is not claimed for every FS7 mag. When that gamma word is set, a second command reads `ColorPrimaries` with `-b`. The 16 bytes `060e2b34040101060401010103030000` are written as `rec709`. Any other bytes, including a Sony private label, leave the gamut empty. `ColorimetryCode` is the matrix and is not read. A private acquisition tail is not read. This is still camera `Sony`.
-7. **ExifTool make**, only when the label is also missing. Ask for `Make` and `Model` only. A matching make sets the camera. Gamma stays `unknown`. Do not ask ExifTool for `ColorSpace` or any picture colour tag.
-8. **`other`.** No camera match. Gamma and gamut are `unknown`. The folder goes to `2.3.Error` with the card.
-
-Apple, DJI, and Insta360 match on the make or the model and write that camera on the card. They do not write a gamma word from the make. An empty gamma still sends the folder to `2.3.Error`, unless step 9 matches a known model. `iPhone 17 Pro Max` is that exception.
-9. **Known camera from ExifTool**, only when the clip still has no gamma word and step 5 did not see a model in the file. ExifTool is asked for `Model`, `DeviceModelName`, and `CameraModelName`. An exact model line sets `camera`, `gamma`, and `gamut` from that block. `iPhone 17 Pro Max` is `HLG` and `BT.2020`. A model that is not listed stays `unknown`.
-
-`ffprobe` `color_transfer` is never read. A missing gamma is never written as Rec.709 unless that model is listed in `known-cameras.conf`. The Panasonic value is the text inside the tag, including `HD`, `V-Log`, `V-LogL`, and `HLG`. The Sony and RED values are copied the same way.
-
-## Picture fields
-
-For Sony and Panasonic, `ffprobe` from the conf fills width, height, frame rate, duration, codec, audio codec, channel count, and timecode. It is not asked for colour.
-
-For RED, those fields come from the `printMeta` text already captured. The binary is `redline` from the conf. An empty key means `REDline` on `PATH`. `ffprobe` is not run on an `.r3d`. A missing binary logs `redline-missing` and does not stop the pass. A non-zero REDline exit is ignored when the gamma line is in the output. No gamma line means gamma and gamut `unknown`, and that folder goes to Error with any other unresolved shoot. There is no second RED detector. The `.RMD` is not opened by this script. REDline reads it with the `_001`.
-
-`range` is `unknown` on every block. No range probe has been decided.
+For RED, those fields come from `REDline --printMeta` when that binary is on `PATH`. `ffprobe` is not run on an `.r3d`. A missing binary logs `redline-missing` and the clip is still carded, with codec `REDCODE`. Gamma and gamut are not read from the REDline text. The `.RMD` is not opened by this script.
 
 ## Card
 
@@ -109,22 +62,18 @@ production: Example
 note: 
 
 clip: clip_001.MOV
-camera: Panasonic
 width: 1920
 height: 1080
 frame_rate: 30000/1001
 duration: 7228.720000
 codec: h264
-gamma: HD
-gamut: BT.709
-range: unknown
 audio: pcm_s24le x 1, pcm_s24le x 1, pcm_s24le x 1, pcm_s24le x 1
 timecode: 08:55:11;12
 ```
 
-A Panasonic or Sony block has no `spans` line. An empty value is the word `unknown`, not a blank. One blank line between blocks.
+An empty value is the word `unknown`, not a blank. One blank line between blocks. There is no `camera`, `gamma`, `gamut`, or `range` line.
 
-The encoder, later, reads `gamma` from this card and does not open the camera file to look for colour. It uses the same `pipe.conf` for `convert`, `converted`, `hevc_root`, and `ffmpeg`.
+The encoder is not built. When it is, it will not find a colour word on this card. Colour readers are on the `research` branch.
 
 ## What this script refuses
 

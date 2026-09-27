@@ -25,7 +25,7 @@ Do not build these tools. Do not put a second copy of their libraries in `/usr/l
 
 ## Exceptions
 
-`REDline` is not an Ubuntu package. The conf names it `REDline`. The script looks that name up on `PATH` and does not rewrite it to `/usr/bin`. A missing binary does not stop a pass. A `.r3d` is then gamma `unknown`, and that shoot goes to Error. Other cameras are read. `install.sh` warns at the end and still exits 0. Install the binary by hand on a machine that logs RED.
+`REDline` is not an Ubuntu package. The conf names it `REDline`. The script looks that name up on `PATH` and does not rewrite it to `/usr/bin`. A missing binary does not stop a pass. A `.r3d` is still carded. The codec line is `REDCODE` and the picture fields are empty. `install.sh` warns at the end and still exits 0. Install the binary by hand on a machine that logs RED.
 
 Jellyfin's ffmpeg is not an Ubuntu package. It is not an exception this pipeline uses. Do not add `repo.jellyfin.org`. Ubuntu 26.04's `ffmpeg` package is 8.0.1. That is the encoder binary when the encoder is written. If a later treatment needs a filter that package does not have, that is a new exception, written here first, the same way `REDline` is.
 
@@ -52,10 +52,9 @@ Read on 2026-09-27 against the rules above.
 
 | Script | Result |
 | --- | --- |
-| `mediapipeline-detect` | `ffprobe` and `exiftool` go to `/usr/bin` when those files exist. `REDline` stays a `PATH` lookup. A missing `REDline` logs `redline-missing` and the pass continues. |
+| `mediapipeline-detect` | `ffprobe` goes to `/usr/bin` when that file exists. `REDline` stays a `PATH` lookup. A missing `REDline` logs `redline-missing` and the clip is still carded. v1 does not call `exiftool`. |
 | `mediapipeline-camscan` | The same two tools, plus `/usr/bin/timeout`, `/usr/bin/iconv`, and `/usr/bin/mediainfo` when those files exist. A missing `REDline` writes `not found` and the report is still written. MediaInfo is evidence. Detection does not read it. |
 | `mediapipeline-status` | `/usr/bin/systemctl` and `/usr/bin/nvidia-smi` when those files exist. No `nvidia-smi` does not fail the screen. |
-| `mediapipeline-camera-rules` | No external binary. It checks the rule file only. |
-| `install.sh` | Stops unless the machine is Ubuntu 26.04. Installs `ffmpeg`, `libimage-exiftool-perl`, and `mediainfo`. Stops if `/usr/bin/ffprobe`, `/usr/bin/exiftool`, or `/usr/bin/mediainfo` does not start. Warns when `REDline` is missing and still exits 0. |
+| `install.sh` | Stops unless the machine is Ubuntu 26.04. Installs `ffmpeg`, `libimage-exiftool-perl`, and `mediainfo`. Stops if `/usr/bin/ffprobe`, `/usr/bin/exiftool`, or `/usr/bin/mediainfo` does not start. Warns when `REDline` is missing and still exits 0. v1 detection does not call `exiftool`. Camscan still does. |
 
 The unit file starts `/usr/local/bin/mediapipeline-detect`. That is the right path for this project's own scripts.

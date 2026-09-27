@@ -1,6 +1,6 @@
 # mediapipeline-camscan
 
-A research probe. It reads one media file in a mag and writes a text report so a camera rule can be written from the tags that are actually there. It does not detect. It does not move a folder. It does not write a mag card. It does not add a treatment. Detection does not read the report.
+A research probe. It reads one media file in a mag and writes a text report. It does not detect. It does not move a folder. It does not write a mag card. v1 does not read the report. Colour readers and camera profiles are on the `research` branch.
 
 The command is `mediapipeline-camscan`. It is not a flag on another program. After you pull this tree, install it with `sudo ./install.sh`.
 
