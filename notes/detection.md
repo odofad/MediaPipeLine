@@ -47,6 +47,8 @@ Where a camera writes its word is `camera-rules.conf`. The grammar is version 1,
 
 This script does not read that file yet. The steps below are still what runs. Change a reader here and change the rule in the same commit. See [camera-rules.md](camera-rules.md).
 
+The archivist ends the folder name with the camera. Detection does not read that word yet. It can name the body when the file itself has none. It cannot choose the gamma. An FS5, an FS7, and an A7 shoot more than one picture, so the folder word is not a picture profile. A mixed mag is still a logging problem. The folder may say A7 while one clip in it is an FX6.
+
 ## Clip identity
 
 `.r3d` is RED before any grep. The clip id is the filename without the final `_NNN`. Only `_001` is a row. `_002` and higher are spans of that `_001` and are not probed. Their names are listed on the `_001` block. A span with no `_001` in the folder is an orphan line on the card. It is not given a gamma.
