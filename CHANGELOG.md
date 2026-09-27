@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-09-27 — camscan read
+
+The first sixteen reports had an empty ffprobe section on every file, including a 5 MB phone clip. ExifTool `-ee` was run on the whole clip and timed out on the large MP4s. A 936 byte file was treated as media. No camera rule is added.
+
+ffprobe now asks for the format and the streams. A tool that exits with no text is `failed` and the status, plus its first error line. `none` is only a read that succeeded and had no tag. `timed out` is unchanged.
+
+The header read and `-ee` run on the head slice and the tail slice as two files, with `-fast`. They are not run on the original, and the two slices are not glued together for ExifTool. The XML grep still uses both ends. `Category` is requested. `DeviceSerialNo` of `4294967295` or `0` is dropped. `ColorRangeLevels` is not requested. `ColorPrimaries` stays in the report and is not a camera word.
+
+A media file under 1 MB is skipped as `too small`. A same-name sidecar is still read first. If there is none, and the mag has one sidecar, that file is read. If it has more than one, the names are listed and none of them is opened.
+
 ## 2026-09-27 — default paths
 
 The shipped folder paths are `/var/lib/mediapipeline/archive` and `/var/lib/mediapipeline/encode`. `install.sh` uses those only when the live conf has no path yet. A machine that already has a conf keeps the paths it is asked to keep. Notes and the README no longer name a particular pool.

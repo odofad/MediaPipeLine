@@ -8,6 +8,7 @@ SLICE_DEFAULT=8388608
 TIMEOUT_DEFAULT=25
 OPEN_TIMEOUT=15
 MAX_TRIES=8
+MIN_BYTES=1048576
 
 media_extensions=""
 sidecar_extensions=""
@@ -107,6 +108,58 @@ capture() {
   printf '%s' "$rc"
 }
 
+# Like capture, but keep the first stderr line. A stopped command is still 124 or 137.
+capture_split() {
+  local secs="$1" dest="$2" errf="$3"
+  shift 3
+  local rc=0 errtmp line
+  : >"$dest"
+  : >"$errf"
+  errtmp="$(mktemp)"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM "$secs" "$@" >"$dest" 2>"$errtmp" || rc=$?
+  else
+    "$@" >"$dest" 2>"$errtmp" || rc=$?
+  fi
+  line="$(grep -m1 . "$errtmp" || true)"
+  printf '%s\n' "$line" >"$errf"
+  rm -f "$errtmp"
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+    printf '%s' "$rc"
+    return 0
+  fi
+  if [[ -s "$dest" ]]; then
+    printf '0'
+    return 0
+  fi
+  printf '%s' "$rc"
+}
+
+# "timed out" when the tool was stopped. "failed <status>" when it exited with
+# no stdout. An empty success stays empty, and the section is then "none".
+note_fail() {
+  local rc="$1" dest="$2" errf="$3" line
+  if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
+    mark_timeout "$rc" "$dest"
+    return 0
+  fi
+  [[ -s "$dest" ]] && return 0
+  [[ "$rc" -eq 0 ]] && return 0
+  printf 'failed %s\n' "$rc" >"$dest"
+  line="$(trim "$(cat "$errf" 2>/dev/null || true)")"
+  [[ -n "$line" ]] && printf '%s\n' "$line" >>"$dest"
+}
+
+# 4294967295 is the empty Sony serial. Zero is the same kind of empty.
+drop_empty_serial() {
+  local dest="$1" tmp
+  [[ -s "$dest" ]] || return 0
+  tmp="$(mktemp)"
+  grep -v -E 'DeviceSerialNo[[:space:]]*:[[:space:]]*(4294967295|0)[[:space:]]*$' "$dest" >"$tmp" || true
+  cat "$tmp" >"$dest"
+  rm -f "$tmp"
+}
+
 mark_timeout() {
   local rc="$1" dest="$2" tmp
   [[ "$rc" -eq 124 || "$rc" -eq 137 ]] || return 0
@@ -179,7 +232,8 @@ file_opens() {
     return 0
   fi
   if command -v "$ffprobe" >/dev/null 2>&1; then
-    out="$(timeout "$OPEN_TIMEOUT" "$ffprobe" -v error -show_entries format=format_name -of default=nw=1:nk=1 "$f" 2>/dev/null || true)"
+    out="$(timeout "$OPEN_TIMEOUT" "$ffprobe" -v error -show_format \
+      -show_entries format=format_name -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null || true)"
     if [[ -n "$(trim "$out")" ]]; then
       open_how="ffprobe"
       return 0
@@ -196,7 +250,7 @@ file_opens() {
 }
 
 pick_file() {
-  local mag="$1" f name tries=0
+  local mag="$1" f name tries=0 size
   local -a names=()
   chosen=""
   open_how=""
@@ -222,6 +276,11 @@ pick_file() {
     fi
     if [[ ! -s "$f" ]]; then
       skipped+=("$name empty")
+      continue
+    fi
+    size="$(stat -c '%s' "$f")"
+    if [[ "$size" -lt "$MIN_BYTES" ]]; then
+      skipped+=("$name too small")
       continue
     fi
     if file_opens "$f"; then
@@ -256,76 +315,184 @@ find_sidecar() {
   return 1
 }
 
+sidecars_in() {
+  local dir="$1" cand
+  [[ -d "$dir" ]] || return 0
+  for cand in "$dir"/*; do
+    [[ -f "$cand" ]] || continue
+    has_ext "$cand" "$sidecar_extensions" || continue
+    printf '%s\n' "$cand"
+  done
+}
+
+fill_sidecar() {
+  local file="$1" mag="$2" dest="$3" side count cand list sorted
+  local -a xmls=() found=()
+  : >"$dest"
+  side="$(find_sidecar "$file" "$mag" || true)"
+  if [[ -n "$side" ]]; then
+    {
+      printf 'file: %s\n' "${side##*/}"
+      xml_body "$side" || true
+    } >"$dest"
+    return 0
+  fi
+  list="$(mktemp)"
+  sorted="$(mktemp)"
+  sidecars_in "${file%/*}" >"$list"
+  if [[ "${file%/*}" != "$mag" ]]; then
+    sidecars_in "$mag" >>"$list"
+  fi
+  sidecars_in "$mag/CLIP" >>"$list"
+  sort -u "$list" >"$sorted"
+  mapfile -t xmls <"$sorted"
+  rm -f "$list" "$sorted"
+  for cand in "${xmls[@]}"; do
+    [[ -n "$cand" ]] || continue
+    found+=("$cand")
+  done
+  count="${#found[@]}"
+  if [[ "$count" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$count" -eq 1 ]]; then
+    {
+      printf 'file: %s\n' "${found[0]##*/}"
+      printf '%s\n' "note: only sidecar in the mag, stem does not match"
+      xml_body "${found[0]}" || true
+    } >"$dest"
+    return 0
+  fi
+  {
+    printf 'note: %s sidecars, not guessing\n' "$count"
+    for cand in "${found[@]}"; do
+      printf 'file: %s\n' "${cand##*/}"
+    done
+  } >"$dest"
+}
+
 fill_ffprobe() {
-  local file="$1" streams="$2" tags="$3" raw rc filtered
+  local file="$1" streams="$2" tags="$3" raw err rc filtered
   raw="$(mktemp)"
+  err="$(mktemp)"
   : >"$streams"
   : >"$tags"
   if ! command -v "$ffprobe" >/dev/null 2>&1; then
     printf 'not found\n' >"$streams"
-    rm -f "$raw"
+    rm -f "$raw" "$err"
     return 0
   fi
-  rc="$(capture "$OPEN_TIMEOUT" "$raw" "$ffprobe" -v error -hide_banner \
-    -show_entries stream=codec_type,codec_name,width,height,avg_frame_rate,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,channels \
-    -show_entries format=format_name,duration,size \
+  rc="$(capture_split "$OPEN_TIMEOUT" "$raw" "$err" "$ffprobe" -v error -hide_banner \
+    -show_format -show_streams \
+    -show_entries 'format=format_name,duration,size:stream=codec_type,codec_name,width,height,avg_frame_rate,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,channels' \
     -of default=noprint_wrappers=1 "$file")"
-  mark_timeout "$rc" "$raw"
+  note_fail "$rc" "$raw" "$err"
   if [[ -s "$raw" ]]; then
     cat "$raw" >"$streams"
   fi
-  rc="$(capture "$OPEN_TIMEOUT" "$raw" "$ffprobe" -v error -hide_banner \
-    -show_entries format_tags -of default=noprint_wrappers=1 "$file")"
-  mark_timeout "$rc" "$raw"
-  filtered="$(grep -iE 'make|model|manufacturer|comment|encoder|creation|com\.apple|dji|insta|sony|panasonic|gamma|gamut|color|handler|software|device' "$raw" || true)"
+  rc="$(capture_split "$OPEN_TIMEOUT" "$raw" "$err" "$ffprobe" -v error -hide_banner \
+    -show_format -show_entries format_tags -of default=noprint_wrappers=1 "$file")"
   if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
     printf 'timed out\n' >"$tags"
+  elif [[ "$rc" -ne 0 ]]; then
+    note_fail "$rc" "$raw" "$err"
+    cat "$raw" >"$tags"
+  else
+    filtered="$(grep -iE 'make|model|manufacturer|comment|encoder|creation|com\.apple|dji|insta|sony|panasonic|gamma|gamut|color|handler|software|device' "$raw" || true)"
+    if [[ -n "$filtered" ]]; then
+      printf '%s\n' "$filtered" >"$tags"
+    fi
   fi
-  if [[ -n "$filtered" ]]; then
-    printf '%s\n' "$filtered" >>"$tags"
-  fi
-  rm -f "$raw"
+  rm -f "$raw" "$err"
+}
+
+exif_header_one() {
+  local slice="$1" dest="$2" raw err rc
+  raw="$(mktemp)"
+  err="$(mktemp)"
+  : >"$dest"
+  rc="$(capture_split "$OPEN_TIMEOUT" "$raw" "$err" "$exiftool" -fast -m -s \
+    -Make -Model -CameraModelName -DeviceManufacturer -DeviceModelName -DeviceSerialNo \
+    -CaptureGammaEquation -CaptureColorPrimaries -CaptureGamma -CaptureGamut \
+    -Gamma -ColorSpace -ColorPrimaries -PictureProfile -GammaType -Category \
+    "$slice")"
+  note_fail "$rc" "$raw" "$err"
+  drop_empty_serial "$raw"
+  [[ -s "$raw" ]] && cat "$raw" >"$dest"
+  rm -f "$raw" "$err"
 }
 
 fill_exif_header() {
-  local file="$1" dest="$2" raw rc
-  raw="$(mktemp)"
+  local head="$1" tail="$2" dest="$3" part
   : >"$dest"
   if ! command -v "$exiftool" >/dev/null 2>&1; then
     printf 'not found\n' >"$dest"
-    rm -f "$raw"
     return 0
   fi
-  rc="$(capture "$OPEN_TIMEOUT" "$raw" "$exiftool" -s \
-    -Make -Model -CameraModelName -DeviceManufacturer -DeviceModelName -DeviceSerialNo \
-    -CaptureGammaEquation -CaptureColorPrimaries -CaptureGamma -CaptureGamut \
-    -Gamma -ColorSpace -ColorPrimaries -PictureProfile -GammaType "$file")"
-  mark_timeout "$rc" "$raw"
-  [[ -s "$raw" ]] && cat "$raw" >"$dest"
-  rm -f "$raw"
+  part="$(mktemp)"
+  exif_header_one "$head" "$part"
+  if [[ -s "$part" ]]; then
+    printf 'head\n' >>"$dest"
+    cat "$part" >>"$dest"
+  fi
+  if [[ -n "$tail" && -s "$tail" ]]; then
+    exif_header_one "$tail" "$part"
+    if [[ -s "$part" ]]; then
+      printf 'tail\n' >>"$dest"
+      cat "$part" >>"$dest"
+    fi
+  fi
+  rm -f "$part"
 }
 
-fill_exif_embedded() {
-  local file="$1" dest="$2" raw rc wide
+exif_embedded_one() {
+  local slice="$1" dest="$2" raw err rc wide line
   raw="$(mktemp)"
+  err="$(mktemp)"
   : >"$dest"
-  if ! command -v "$exiftool" >/dev/null 2>&1; then
-    printf 'not found\n' >"$dest"
-    rm -f "$raw"
-    return 0
-  fi
   rc=0
-  # head closes the pipe after 2000 lines so a chatty file cannot fill the disk.
-  timeout --signal=TERM "$camscan_timeout" \
-    bash -c '"$1" -a -s -G1 -ee "$2" 2>/dev/null | head -n 2000' _ "$exiftool" "$file" >"$raw" || rc=$?
-  wide="$(grep -iE 'gamma|gamut|color|primar|picture|profile|device|make|model|manufacturer' "$raw" 2>/dev/null | head -n 80 || true)"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM "$camscan_timeout" \
+      "$exiftool" -fast -m -a -s -G1 -ee "$slice" >"$raw" 2>"$err" || rc=$?
+  else
+    "$exiftool" -fast -m -a -s -G1 -ee "$slice" >"$raw" 2>"$err" || rc=$?
+  fi
+  line="$(grep -m1 . "$err" || true)"
+  wide="$(grep -iE 'gamma|gamut|color|primar|picture|profile|device|make|model|manufacturer|category' "$raw" | head -n 80 || true)"
   if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
     printf 'timed out\n' >"$dest"
+  elif [[ "$rc" -ne 0 && -z "$wide" ]]; then
+    printf 'failed %s\n' "$rc" >"$dest"
+    [[ -n "$line" ]] && printf '%s\n' "$line" >>"$dest"
   fi
   if [[ -n "$wide" ]]; then
     printf '%s\n' "$wide" >>"$dest"
   fi
-  rm -f "$raw"
+  drop_empty_serial "$dest"
+  rm -f "$raw" "$err"
+}
+
+fill_exif_embedded() {
+  local head="$1" tail="$2" dest="$3" part
+  : >"$dest"
+  if ! command -v "$exiftool" >/dev/null 2>&1; then
+    printf 'not found\n' >"$dest"
+    return 0
+  fi
+  part="$(mktemp)"
+  exif_embedded_one "$head" "$part"
+  if [[ -s "$part" ]]; then
+    printf 'head\n' >>"$dest"
+    cat "$part" >>"$dest"
+  fi
+  if [[ -n "$tail" && -s "$tail" ]]; then
+    exif_embedded_one "$tail" "$part"
+    if [[ -s "$part" ]]; then
+      printf 'tail\n' >>"$dest"
+      cat "$part" >>"$dest"
+    fi
+  fi
+  rm -f "$part"
 }
 
 fill_redline() {
@@ -352,9 +519,8 @@ fill_redline() {
 }
 
 scan_mag() {
-  local mag="$1" mag_abs mag_name file side body slice u16 bytes
+  local mag="$1" mag_abs mag_name file body slice head_slice tail_slice u16 bytes
   local streams tags header embedded red side_body
-  local -a skipped=()
   mag_abs="$(cd "$mag" && pwd)"
   mag_name="$(basename "$mag_abs")"
   if [[ "$mag_abs" == "/" || "$mag_abs" == "$HOME" ]]; then
@@ -386,9 +552,14 @@ scan_mag() {
   echo "  ${file##*/}"
   bytes="$(stat -c '%s' "$file")"
   slice="$(mktemp)"
-  head -c "$camscan_slice" "$file" >"$slice"
+  head_slice="$(mktemp)"
+  tail_slice=""
+  head -c "$camscan_slice" "$file" >"$head_slice"
+  cat "$head_slice" >"$slice"
   if [[ "$bytes" -gt "$camscan_slice" ]]; then
-    tail -c "$camscan_slice" "$file" >>"$slice"
+    tail_slice="$(mktemp)"
+    tail -c "$camscan_slice" "$file" >"$tail_slice"
+    cat "$tail_slice" >>"$slice"
   fi
 
   {
@@ -420,10 +591,10 @@ scan_mag() {
   write_section_file "ffprobe" "$streams"
   write_section_file "ffprobe-tags" "$tags"
 
-  fill_exif_header "$file" "$header"
+  fill_exif_header "$head_slice" "$tail_slice" "$header"
   write_section_file "exiftool" "$header"
 
-  fill_exif_embedded "$file" "$embedded"
+  fill_exif_embedded "$head_slice" "$tail_slice" "$embedded"
   write_section_file "exiftool-embedded" "$embedded"
 
   body="$(xml_body "$slice" || true)"
@@ -446,21 +617,14 @@ scan_mag() {
   fi
   write_section_file "xml-utf16be" "$side_body"
 
-  side="$(find_sidecar "$file" "$mag_abs" || true)"
-  if [[ -n "$side" ]]; then
-    {
-      printf 'file: %s\n' "${side##*/}"
-      xml_body "$side" || true
-    } >"$side_body"
-  else
-    : >"$side_body"
-  fi
+  fill_sidecar "$file" "$mag_abs" "$side_body"
   write_section_file "sidecar" "$side_body"
 
   fill_redline "$file" "$red"
   write_section_file "redline" "$red"
 
-  rm -f "$streams" "$tags" "$header" "$embedded" "$red" "$side_body" "$u16" "$slice"
+  rm -f "$streams" "$tags" "$header" "$embedded" "$red" "$side_body" "$u16" "$slice" "$head_slice"
+  [[ -n "$tail_slice" ]] && rm -f "$tail_slice"
   echo "  wrote $report"
 }
 

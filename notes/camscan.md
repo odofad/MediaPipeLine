@@ -24,7 +24,7 @@ The report is `$HOME/camscan/<mag folder name>.txt`. One mag, one file. A second
 
 Only a file directly inside the mag, whose lowercased name ends with a `media_extensions` entry, is a candidate. The shipped list is `.mxf .mov .mp4 .r3d .mts`.
 
-Candidates are tried in name order. An empty file is skipped. A file that both `ffprobe` and ExifTool cannot open is skipped. A non-empty `.r3d` is taken even when `REDline` is missing, because the file itself is the media. The first file that opens is the one that is probed. It tries at most 8 media files, then writes a report that says `file: none`.
+Candidates are tried in name order. An empty file is skipped. A file under 1 MB is skipped, and the report says `too small`. A file that both `ffprobe` and ExifTool cannot open is skipped. A `.r3d` of at least 1 MB is taken even when `REDline` is missing, because the file itself is the media. The first file that opens is the one that is probed. It tries at most 8 media files, then writes a report that says `file: none`.
 
 One file is enough to see how that camera writes its words. It is not a check that every clip in the mag matches.
 
@@ -34,17 +34,17 @@ The middle of the file is not read. A grep of a whole MXF is what hung the hand 
 
 | Test | What it does |
 | --- | --- |
-| `ffprobe` | Container, video size, frame rate, codec, audio, and ffprobe's own colour tags. Those colour tags are not a camera word. |
+| `ffprobe` | Container, video size, frame rate, codec, audio, and ffprobe's own colour tags, from the whole file. The call uses `-show_format` and `-show_streams`. Those colour tags are not a camera word. |
 | `ffprobe-tags` | Format tags whose names look like make, model, colour, or a camera maker. Apple, DJI, and Insta360 often put the model here. |
-| `exiftool` | `Make`, `Model`, device name, and the gamma tags, from the header only. No `-ee`. This is the fast read. The FDR-AX53 does not answer it. |
-| `exiftool-embedded` | The same file with `-ee`, then only lines about gamma, colour, picture profile, device, make, or model. Stopped after `camscan_timeout` seconds. This is the read that found `DeviceModelName : FDR-AX53`. |
+| `exiftool` | `Make`, `Model`, `Category`, device name, and the gamma tags. `-fast`, no `-ee`. Run on the head slice, then on the tail slice when the file is longer than the slice. The two slices are not joined for this read. `DeviceSerialNo` of `4294967295` or `0` is dropped. `ColorPrimaries` may appear. It is not a camera word. `ColorRangeLevels` is not requested. |
+| `exiftool-embedded` | `-ee -fast` on those same two slices, then only lines about gamma, colour, picture profile, device, make, model, or category. Each slice stops after `camscan_timeout` seconds. A `head` or `tail` line says which slice the lines came from. |
 | `xml` | Panasonic elements, Sony `Item name` / `value` in either order, and `DeviceManufacturer` / `DeviceModelName`, from the first `camscan_slice` bytes and the last `camscan_slice` bytes. |
 | `xml-utf16le` | Those same two slices, decoded as UTF-16LE, including a one-byte shift. Sony MXF often stores the XML this way, which is why a plain grep misses it. |
 | `xml-utf16be` | The same slices as UTF-16BE. |
-| `sidecar` | One same-name sidecar beside the clip or in `CLIP/`, read in full. Sidecars are small. The clip is not. |
+| `sidecar` | A same-name sidecar beside the clip or in `CLIP/`, read in full. If there is no same-name file and the mag has exactly one sidecar, that file is read and the section says the stem does not match. If it has more than one, the names are listed and none is opened. Sidecars are small. The clip is not. |
 | `redline` | `REDline --printMeta` when the file ends in `.r3d`. Otherwise the section says `not r3d`. |
 
-`none` means that test found nothing. It is not the card word `unknown`. `timed out` means the tool was stopped. Lines above it are kept. `not found` means that tool is not on `PATH`.
+`none` means that test ran and found nothing. It is not the card word `unknown`. `failed` and a status means the tool exited with no text. The next line is its first error line. `timed out` means the tool was stopped. Lines above it are kept. `not found` means that tool is not on `PATH`.
 
 The shape of the file is in [SYNTAX.md](../SYNTAX.md).
 
@@ -57,7 +57,7 @@ camscan_slice = 8388608
 camscan_timeout = 25
 ```
 
-`camscan_slice` is how many bytes are taken from the head and again from the tail. `camscan_timeout` is how many seconds ExifTool `-ee` and `REDline` are allowed to run. `ffprobe` and the header ExifTool call stop after 15 seconds.
+`camscan_slice` is how many bytes are taken from the head and again from the tail. `camscan_timeout` is how many seconds one ExifTool `-ee` call on one slice is allowed to run, and how many seconds `REDline` is allowed. `ffprobe` and the header ExifTool call stop after 15 seconds. The header call is also one slice at a time.
 
 `install.sh` does not write these two lines into a live conf that already exists. If they are missing, the script uses `8388608` and `25` and says so on stdout. Add the two lines to `/etc/mediapipeline/pipe.conf` when you want the notice to stop. Do not put them only in the shipped `pipe.conf` and expect the live file to change. The next install will not copy them over.
 

@@ -14,7 +14,7 @@ The cameras detection can already read are RED, Panasonic, and the Sony bodies t
 
 `mediapipeline-status` reports the logging pass and the encoder. The encoder is not installed.
 
-`mediapipeline-camscan` opens one file in a mag and writes a report. It does not move the folder and it does not write a card. That report is how an unknown camera gets a rule. The first one read this way is the FDR-AX53: the model is in the file, and no gamma word is stored.
+`mediapipeline-camscan` opens one file in a mag and writes a report. It does not move the folder and it does not write a card. A failed tool is recorded as `failed`, not as `none`. A file under 1 MB is skipped. That report is how an unknown camera gets a rule. The first one read this way is the FDR-AX53: the model is in the file, and no gamma word is stored.
 
 ## Where it is going
 

@@ -111,23 +111,23 @@ Stdout is for a person at the terminal. It is not this format. Do not parse it.
 
 It is not a mag card. Detection does not read it. Do not copy it onto a card. A missing tag is the word `none`, not `unknown`. `unknown` stays a card word.
 
-The first lines are a banner, then `key: value` for the mag, the path, the file that was opened, its size in bytes, the slice size, and the scan time. `skipped:` is one unopened media file. It is omitted when the first file opened.
+The first lines are a banner, then `key: value` for the mag, the path, the file that was opened, its size in bytes, the slice size, and the scan time. `skipped:` is one media file that was not probed. The reason is `empty`, `too small`, or `unreadable`. A file under 1 MB is `too small`. The line is omitted when the first file opened.
 
-Then sections, in this order. A section is a line `[name]`, then lines, then a blank line. An empty section is the single word `none`.
+Then sections, in this order. A section is a line `[name]`, then lines, then a blank line. An empty section is the single word `none`. `none` means the read succeeded and the tag was not there.
 
 | Section | What was read |
 | --- | --- |
-| `ffprobe` | Container and the first video and audio streams. Colour tags here are ffprobe's, not a camera word. |
+| `ffprobe` | Container and the streams, from the whole file. Colour tags here are ffprobe's, not a camera word. |
 | `ffprobe-tags` | Format tags whose names match make, model, colour, or a camera maker. |
-| `exiftool` | Header tags only. No `-ee`. |
-| `exiftool-embedded` | The same file with `-ee`, stopped at `camscan_timeout`. |
+| `exiftool` | Header tags from the head slice, then the tail slice. No `-ee`. A `head` or `tail` line says which slice. `DeviceSerialNo` of `4294967295` or `0` is omitted. |
+| `exiftool-embedded` | `-ee` on those same two slices, stopped at `camscan_timeout` for each. A `head` or `tail` line says which slice. |
 | `xml` | Panasonic elements, Sony `Item` attributes, and Sony device elements, from the head and the tail only. |
 | `xml-utf16le` | The same slice read as UTF-16LE, including a one-byte shift. |
 | `xml-utf16be` | The same slice read as UTF-16BE, including a one-byte shift. |
-| `sidecar` | A same-name sidecar beside the file or in `CLIP/`, read in full. |
+| `sidecar` | A same-name sidecar beside the file or in `CLIP/`, read in full. If the stem does not match and the mag has one sidecar, that file is read and the section has `note: only sidecar in the mag, stem does not match`. If it has more than one, the section has `note: N sidecars, not guessing` and one `file:` line per name. None of those files is opened. |
 | `redline` | `REDline --printMeta` when the file is `.r3d`. Otherwise `not r3d`. |
 
-`timed out` means the tool was stopped. Partial lines above it are kept. `not found` means the tool was not on `PATH`.
+`failed <status>` means the tool exited with no text. The next line is the first line it wrote to stderr. `timed out` means the tool was stopped. Partial lines above it are kept. `not found` means the tool was not on `PATH`.
 
 ## Camera rules
 
