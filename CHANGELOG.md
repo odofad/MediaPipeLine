@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — mag and short clip id
+
+The card header key is `mag`, not `folder`. The value is still the shoot folder name. A clip id is the mag date and five hex characters: `20260401_a1b2c`. A rebuild still keeps an id that is already on the clip.
+
 ## 2026-09-27 — clip id and comment
 
 Every clip block has an `id` and a `comment`. The id is the folder name, the clip filename, and five hex characters. A rebuild keeps the id and the comment. A new clip gets a new id and an empty comment. An empty comment is not the word `unknown`.

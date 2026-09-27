@@ -27,7 +27,7 @@ The first `:` splits the key from the value. Space around the value is removed w
 The file is `<folder name>` plus `card_suffix`. The suffix includes the dot. The shipped suffix is `.mag.txt`.
 
 ```text
-folder: 2026_04_01_New_CX350
+mag: 2026_04_01_New_CX350
 date: 2026-04-01
 copyright: ...
 owner: ...
@@ -37,7 +37,7 @@ note:
 orphan: clip_002.R3D
 
 clip: clip_001.R3D
-id: 2026_04_01_New_CX350_clip_001.R3D_a1b2c
+id: 20260401_a1b2c
 spans: clip_002.R3D clip_003.R3D
 width: 1920
 height: 1080
@@ -49,7 +49,7 @@ timecode: 01:00:00:00
 comment:
 ```
 
-Header, in this order: `folder`, `date`, then `copyright` and `owner` only when those conf values are not empty, then `production`, then `note`, then a blank line.
+Header, in this order: `mag`, `date`, then `copyright` and `owner` only when those conf values are not empty, then `production`, then `note`, then a blank line.
 
 `date` is `YYYY-MM-DD`, taken from the first ten characters of the folder name.
 
@@ -59,7 +59,7 @@ Header, in this order: `folder`, `date`, then `copyright` and `owner` only when 
 
 Each clip is one block. Blocks are separated by one blank line. The keys, in this order, are `clip`, `id`, `spans` only when the clip has spans, `width`, `height`, `frame_rate`, `duration`, `codec`, `audio`, `timecode`, `comment`. v1 does not write `camera`, `gamma`, `gamut`, or `range`. Colour detection is on the `research` branch.
 
-`id` is the folder name, the clip filename, and five hex characters, joined by `_`. A rebuild keeps the first `id` already on that clip. A clip with no `id` line gets a new one. `comment` is for a person. A rebuild keeps the first `comment` on that clip and writes an empty one when there is none. An empty comment is not the word `unknown`.
+`id` is the mag date as `YYYYMMDD`, then `_`, then five hex characters, as in `20260401_a1b2c`. A rebuild keeps the first `id` already on that clip. A clip with no `id` line gets a new one. Two new clips in one pass do not get the same id. `comment` is for a person. A rebuild keeps the first `comment` on that clip and writes an empty one when there is none. An empty comment is not the word `unknown`.
 
 ## Names
 

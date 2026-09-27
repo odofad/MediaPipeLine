@@ -139,11 +139,22 @@ read_clip_fields() {
 }
 
 new_clip_id() {
-  local mag="$1" clip="$2" hex
-  hex=$(od -An -N4 -tx1 /dev/urandom)
-  hex=${hex//[[:space:]]/}
-  hex=${hex:0:5}
-  printf '%s_%s_%s' "$mag" "$clip" "$hex"
+  local mag="$1" hex day existing used
+  day="${mag:0:4}${mag:5:2}${mag:8:2}"
+  while true; do
+    hex=$(od -An -N4 -tx1 /dev/urandom)
+    hex=${hex//[[:space:]]/}
+    hex=${hex:0:5}
+    [[ ${#hex} -eq 5 ]] || continue
+    used=0
+    if [[ ${#clip_id[@]} -gt 0 ]]; then
+      for existing in "${clip_id[@]}"; do
+        [[ "$existing" == "${day}_${hex}" ]] && used=1 && break
+      done
+    fi
+    [[ "$used" -eq 0 ]] && break
+  done
+  printf '%s_%s' "$day" "$hex"
 }
 
 fill_picture_ffprobe() {
@@ -270,7 +281,10 @@ probe_other_media() {
 write_block() {
   local clip="$1" spans="${2:-}" mag="$3" id comment
   id="${clip_id[$clip]:-}"
-  [[ -n "$id" ]] || id=$(new_clip_id "$mag" "$clip")
+  if [[ -z "$id" ]]; then
+    id=$(new_clip_id "$mag")
+    clip_id["$clip"]=$id
+  fi
   comment="${clip_comment[$clip]-}"
   {
     printf 'clip: %s\n' "$clip"
@@ -379,7 +393,7 @@ process_folder() {
   read_human_fields "$card"
   read_clip_fields "$card"
   {
-    printf 'folder: %s\n' "$base"
+    printf 'mag: %s\n' "$base"
     printf 'date: %s\n' "${base:0:4}-${base:5:2}-${base:8:2}"
     [[ -n "$copyright" ]] && printf 'copyright: %s\n' "$copyright"
     [[ -n "$owner" ]] && printf 'owner: %s\n' "$owner"
