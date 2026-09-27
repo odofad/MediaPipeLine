@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-09-27 — camera rules
+
+`camera-rules.conf` is version 1 of the camera rule file. It says where a camera writes its own word. It does not say what the encoder does with that word. Treatments stay in `pipe.conf`.
+
+The grammar is the header of that file. A rule is `family`, `applies`, `read`, `match`, and `camera`, plus the tag and pattern lists those reads need. An unknown key or a value outside its list is an error. A new key is a new version.
+
+The five rules are the readers detection already uses: RED, Panasonic XML, Sony `name` then `value`, then ExifTool make for Panasonic and Sony. ExifTool is not asked for colour. The Sony attribute order `either` is legal and unused. FS5, FS7, SmallSony, phone, DJI, and Insta360 are not rules.
+
+`mediapipeline-camera-rules` checks the file. It does not open a clip. `mediapipeline-detect` does not read the file yet. The file is not copied to `/etc/mediapipeline/`.
+
 ## 2026-09-27 — status screen
 
 `mediapipeline-status` no longer lists the archive folders by directory name. It reports the logging pass and the encoder as three states each.

@@ -38,6 +38,12 @@ Errors are appended to `/var/log/mediapipeline/detect.log`. The path is not in `
 2026-09-27T11:54:00+02:00 error 2026_04_01_New_CX350
 ```
 
+## Camera rules
+
+Where a camera writes its word is `camera-rules.conf`. The grammar is version 1, in the header of that file. `mediapipeline-camera-rules` checks the file. It does not probe a clip.
+
+This script does not read that file yet. The steps below are still what runs. Change a reader here and change the rule in the same commit. See [camera-rules.md](camera-rules.md).
+
 ## Clip identity
 
 `.r3d` is RED before any grep. The clip id is the filename without the final `_NNN`. Only `_001` is a row. `_002` and higher are spans of that `_001` and are not probed. Their names are listed on the `_001` block. A span with no `_001` in the folder is an orphan line on the card. It is not given a gamma.
@@ -57,7 +63,7 @@ A Panasonic make is a `Manufacturer` containing `Panasonic`, or a `ModelName` st
 4. **Sony grep**, only when the file had no Panasonic XML at all:
 
 ```bash
-grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries)" value="[^"]+"' "$file"
+grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manufacturer|Model|ModelName|CameraModelName)" value="[^"]+"' "$file"
 ```
 
 A Sony make is `CaptureGammaEquation` present, or a make/model string `ILME-…`, `PXW-…`, or `Sony`. The word `Sony` is only accepted as the make, not as a hit anywhere in the file.

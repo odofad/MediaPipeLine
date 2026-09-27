@@ -1,0 +1,261 @@
+#!/bin/bash
+# Check camera-rules.conf. Do not probe a clip. Do not write a card.
+# mediapipeline-camera-rules path/to/camera-rules.conf
+set -euo pipefail
+
+usage() {
+  echo "usage: mediapipeline-camera-rules <camera-rules.conf>" >&2
+  exit 2
+}
+
+if [[ $# -ne 1 || "$1" == -h || "$1" == --help ]]; then
+  usage
+fi
+
+file="$1"
+if [[ ! -f "$file" ]]; then
+  echo "camera-rules: no file: $file" >&2
+  exit 1
+fi
+
+errors=0
+version=""
+rule_count=0
+seen_other_media=0
+families=""
+
+family="" applies="" read_how="" match="" camera=""
+attribute_order="" sidecar="" sidecar_when=""
+make_tags=0 model_tags=0 gamma_tags=0 gamut_tags=0
+make_pats=0 model_pats=0
+singles=""
+
+err() {
+  echo "camera-rules: ${family:+$family: }$*" >&2
+  errors=$((errors + 1))
+}
+
+is_enum() {
+  local want="$1" value="$2" item
+  for item in $want; do
+    [[ "$item" == "$value" ]] && return 0
+  done
+  return 1
+}
+
+valid_pattern() {
+  local p="$1" core
+  [[ -n "$p" ]] || return 1
+  core="${p#\*}"
+  core="${core%\*}"
+  [[ -n "$core" && "$core" != *'*'* ]]
+}
+
+reset_rule() {
+  family="" applies="" read_how="" match="" camera=""
+  attribute_order="" sidecar="" sidecar_when=""
+  make_tags=0 model_tags=0 gamma_tags=0 gamut_tags=0
+  make_pats=0 model_pats=0
+  singles=" "
+}
+
+note_single() {
+  local key="$1"
+  if [[ "$singles" == *" $key "* ]]; then
+    err "$key repeated"
+    return 1
+  fi
+  singles+="$key "
+  return 0
+}
+
+finish_rule() {
+  local item
+  [[ -n "$family" ]] || return 0
+  rule_count=$((rule_count + 1))
+
+  [[ -n "$applies" ]] || err "applies missing"
+  [[ -n "$read_how" ]] || err "read missing"
+  [[ -n "$match" ]] || err "match missing"
+  [[ -n "$camera" ]] || err "camera missing"
+
+  if [[ "$applies" == other-media ]]; then
+    seen_other_media=1
+  elif [[ "$applies" == r3d && "$seen_other_media" -eq 1 ]]; then
+    err "r3d rule after an other-media rule"
+  fi
+
+  if [[ "$read_how" == xml-attribute ]]; then
+    [[ -n "$attribute_order" ]] || err "attribute_order missing"
+  elif [[ -n "$attribute_order" ]]; then
+    err "attribute_order is only for xml-attribute"
+  fi
+
+  if [[ "$read_how" == exiftool-make ]]; then
+    [[ "$gamma_tags" -eq 0 && "$gamut_tags" -eq 0 ]] || err "exiftool-make cannot name a colour tag"
+    [[ -z "$sidecar" || "$sidecar" == none ]] || err "exiftool-make cannot take a sidecar"
+  fi
+  if [[ "$read_how" == redline-printmeta ]]; then
+    [[ "$applies" == r3d && "$match" == extension ]] || err "redline-printmeta is only applies r3d, match extension"
+    [[ -z "$sidecar" || "$sidecar" == none ]] || err "redline-printmeta cannot take a sidecar"
+  fi
+
+  if [[ "$match" == extension && "$applies" != r3d ]]; then
+    err "match extension is only for applies r3d"
+  fi
+  if [[ "$match" == tag-or-make ]]; then
+    if [[ "$gamma_tags" -eq 0 && "$gamut_tags" -eq 0 && "$make_pats" -eq 0 && "$model_pats" -eq 0 ]]; then
+      err "tag-or-make has no tag and no pattern"
+    fi
+  fi
+  if [[ "$match" == make ]]; then
+    [[ "$gamma_tags" -eq 0 && "$gamut_tags" -eq 0 ]] || err "match make cannot name a colour tag"
+    [[ "$make_pats" -gt 0 || "$model_pats" -gt 0 ]] || err "match make has no pattern"
+  fi
+
+  if [[ -n "$sidecar_when" && -z "$sidecar" ]]; then
+    err "sidecar_when without sidecar"
+  fi
+  if [[ "$sidecar" == same-name && "$sidecar_when" != gamma-empty && "$sidecar_when" != never ]]; then
+    err "same-name requires sidecar_when"
+  fi
+  if [[ "$sidecar_when" == gamma-empty && "$sidecar" != same-name ]]; then
+    err "gamma-empty requires sidecar same-name"
+  fi
+
+  if [[ "$errors" -eq 0 ]]; then
+    printf '  %-18s camera %s\n' "$family" "$camera"
+  fi
+}
+
+reset_rule
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+  [[ -z "$line" || "$line" == \#* ]] && continue
+  if [[ "$line" != *=* ]]; then
+    err "not a key: $line"
+    continue
+  fi
+  key="${line%%=*}"
+  val="${line#*=}"
+  key="${key%"${key##*[![:space:]]}"}"
+  key="${key#"${key%%[![:space:]]*}"}"
+  val="${val#"${val%%[![:space:]]*}"}"
+  val="${val%"${val##*[![:space:]]}"}"
+  if [[ -z "$key" || "$key" == *" "* ]]; then
+    err "bad key near: $line"
+    continue
+  fi
+
+  if [[ "$key" == version ]]; then
+    if [[ -n "$family" || "$rule_count" -gt 0 ]]; then
+      err "version after a rule"
+    elif [[ -n "$version" ]]; then
+      err "version repeated"
+    elif [[ "$val" != 1 ]]; then
+      err "version $val is not supported"
+    else
+      version=1
+      echo "camera-rules version 1"
+    fi
+    continue
+  fi
+
+  if [[ -z "$version" ]]; then
+    err "version missing before $key"
+    version=1
+  fi
+
+  if [[ "$key" == family ]]; then
+    finish_rule
+    reset_rule
+    family="$val"
+    if [[ ! "$family" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+      err "family must be lowercase words and hyphens"
+    elif [[ " $families " == *" $family "* ]]; then
+      err "family repeated"
+    else
+      families+="$family "
+    fi
+    singles=" family "
+    continue
+  fi
+
+  if [[ -z "$family" ]]; then
+    err "$key before family"
+    continue
+  fi
+
+  case "$key" in
+    applies)
+      note_single applies || true
+      applies="$val"
+      is_enum "r3d other-media" "$val" || err "applies $val"
+      ;;
+    read)
+      note_single read || true
+      read_how="$val"
+      is_enum "redline-printmeta xml-element xml-attribute exiftool-make" "$val" || err "read $val"
+      ;;
+    match)
+      note_single match || true
+      match="$val"
+      is_enum "extension tag-or-make make" "$val" || err "match $val"
+      ;;
+    camera)
+      note_single camera || true
+      camera="$val"
+      if [[ -z "$camera" || "$camera" == other || "$camera" == *[[:space:]=:]* ]]; then
+        err "camera $val"
+      fi
+      ;;
+    attribute_order)
+      note_single attribute_order || true
+      attribute_order="$val"
+      is_enum "name-value either" "$val" || err "attribute_order $val"
+      ;;
+    sidecar)
+      note_single sidecar || true
+      sidecar="$val"
+      is_enum "none same-name" "$val" || err "sidecar $val"
+      ;;
+    sidecar_when)
+      note_single sidecar_when || true
+      sidecar_when="$val"
+      is_enum "never gamma-empty" "$val" || err "sidecar_when $val"
+      ;;
+    make_tag) make_tags=$((make_tags + 1)) ;;
+    model_tag) model_tags=$((model_tags + 1)) ;;
+    gamma_tag) gamma_tags=$((gamma_tags + 1)) ;;
+    gamut_tag) gamut_tags=$((gamut_tags + 1)) ;;
+    make_match|model_match)
+      if [[ "$key" == make_match ]]; then
+        make_pats=$((make_pats + 1))
+      else
+        model_pats=$((model_pats + 1))
+      fi
+      valid_pattern "$val" || err "$key pattern $val"
+      ;;
+    *)
+      err "unknown key $key"
+      ;;
+  esac
+done < "$file"
+
+finish_rule
+
+if [[ -z "$version" ]]; then
+  err "version missing"
+fi
+if [[ "$rule_count" -eq 0 ]]; then
+  err "no rules"
+fi
+
+if [[ "$errors" -gt 0 ]]; then
+  echo "camera-rules: $errors error(s)" >&2
+  exit 1
+fi
+
+echo "ok"

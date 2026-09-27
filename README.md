@@ -8,11 +8,14 @@ On the server it belongs at `/opt/MediaPipeLine`, on the pool, so a reinstall of
 MediaPipeLine/
   install.sh     copies this tree into the system locations
   pipe.conf      shipped defaults for paths, tunables, and extensions
+  camera-rules.conf  where a camera writes its gamma word. Version 1.
   bin/           scripts. Installed to /usr/local/bin
   systemd/       units and timers. Installed to /etc/systemd/system
   notes/         the script plan and the probe notes
   CHANGELOG.md   what changed, newest first
 ```
+
+`camera-rules.conf` is the camera rule list. The grammar is fixed at version 1. `mediapipeline-camera-rules` checks that file and does not probe a clip. Detection does not read the file yet. A treatment stays in `pipe.conf`.
 
 `bin/mediapipeline-detect` is the detection pass. `systemd/` holds its timer. `install.sh` asks whether to enable that timer. The timer runs as the user you name. Press enter and it uses the user who ran `sudo`. 
 
