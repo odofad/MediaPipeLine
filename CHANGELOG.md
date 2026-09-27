@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — mediainfo filter
+
+The first MediaInfo reports kept file-size lines and dropped `Other #1`, which is where an MXF puts acquisition metadata. Camscan now keeps every `Other` block and drops the size lines.
+
 ## 2026-09-27 — mediainfo
 
 Camscan now runs `/usr/bin/mediainfo` on the whole file and writes a `[mediainfo]` section. `--ParseSpeed=0` reads the header and does not walk the picture. Audio blocks are dropped. Colour, transfer, and matrix lines are not a camera word. Detection does not read the section. `install.sh` installs the `mediainfo` package and stops if `/usr/bin/mediainfo` does not start.

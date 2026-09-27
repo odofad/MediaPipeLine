@@ -448,8 +448,8 @@ fill_mediainfo() {
     return 0
   fi
   printf 'whole file, header only\n' >"$dest"
-  rc="$(capture_split "$camscan_timeout" "$raw" "$err" "$mediainfo" \
-    --Full --ParseSpeed=0 --Language=raw "$file")"
+  rc="$(capture_split "$camscan_timeout" "$raw" "$err" \
+    env COLUMNS=240 "$mediainfo" --Full --ParseSpeed=0 --Language=raw "$file")"
   if [[ "$rc" -eq 124 || "$rc" -eq 137 ]]; then
     printf 'timed out\n' >>"$dest"
   elif [[ "$rc" -ne 0 && ! -s "$raw" ]]; then
@@ -461,10 +461,11 @@ fill_mediainfo() {
   fi
   awk '
     /^[^[:space:]]/ && index($0, ":") == 0 { sec = $0; next }
-    sec == "Audio" || sec == "Menu" { next }
-    sec == "General" || sec == "Other" || sec == "Image" || sec == "Text" { print; next }
-    sec == "Video" && tolower($0) ~ /gamma|gamut|make|model|manufacturer|camera|device|profile|primar|transfer|matrix|colour|color|sony|picture|format|width|height|frame/ { print }
-  ' "$raw" | head -n 160 >>"$dest"
+    sec ~ /^Audio/ || sec ~ /^Menu/ { next }
+    $0 ~ /FileSize|Duration\/|StreamSize|OverallBitRate|FrameCount|HeaderSize|FooterSize|DataSize|IsStreamable|File_Modified|Tagged_Date|Encoded_Date|CompleteName|FolderName|FileName|StreamCount|StreamKind|Count / { next }
+    sec ~ /^Other/ { print; next }
+    tolower($0) ~ /gamma|gamut|make|model|manufacturer|camera|device|profile|primar|transfer|matrix|colour|color|sony|panasonic|dji|insta|apple|pxw|ilme|acquisition|encoded_application|encoded_hardware|encoded_library|hdr_|picture|writing_application/ { print }
+  ' "$raw" | head -n 200 >>"$dest"
   rm -f "$raw" "$err"
 }
 
