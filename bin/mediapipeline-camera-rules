@@ -144,6 +144,9 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   key="${key#"${key%%[![:space:]]*}"}"
   val="${val#"${val%%[![:space:]]*}"}"
   val="${val%"${val##*[![:space:]]}"}"
+  if [[ "$val" == \"*\" && "$val" == *\" && ${#val} -ge 2 ]]; then
+    val="${val:1:${#val}-2}"
+  fi
   if [[ -z "$key" || "$key" == *" "* ]]; then
     err "bad key near: $line"
     continue

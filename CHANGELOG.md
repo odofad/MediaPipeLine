@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-09-27 — syntax
+
+`SYNTAX.md` is the line shapes the project already uses. A new shape is added there before a script starts writing it.
+
+Assignment is `key = value`, in `pipe.conf` and `camera-rules.conf`. A `#` after a value is part of the value. One pair of surrounding double quotes is removed. `pipe.conf` skips a key it does not use. `camera-rules.conf` rejects an unknown key. The checker now strips quotes the same way the conf reader does.
+
+The mag card is `key: value`. The header, the orphan lines, and the clip block are listed in order. `unknown` means the value was empty. `production` and `note` stay the only hand-edited lines.
+
+The detect log is `date -Iseconds`, one space, then a verb from the list in that file. Stdout is not that format.
+
 ## 2026-09-27 — camera rules
 
 `camera-rules.conf` is version 1 of the camera rule file. It says where a camera writes its own word. It does not say what the encoder does with that word. Treatments stay in `pipe.conf`.

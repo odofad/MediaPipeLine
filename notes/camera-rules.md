@@ -1,6 +1,6 @@
 # Camera rules
 
-`camera-rules.conf` is where a camera writes its own word. The grammar is the header of that file. Version 1. `mediapipeline-camera-rules` checks the file and prints the rule names. It does not open a clip.
+The assignment line is [SYNTAX.md](../SYNTAX.md). `camera-rules.conf` uses that line, then adds the grammar in its header. Version 1. `mediapipeline-camera-rules` checks the file and prints the rule names. It does not open a clip.
 
 `mediapipeline-detect` does not read the file yet. The readers in the script are still what runs. A change to a reader and a change to the rule are the same commit. Do not add a camera in the script that is not a rule.
 

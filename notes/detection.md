@@ -2,6 +2,8 @@
 
 One shot, one pass. The file will be `bin/mediapipeline-detect`. It does not encode, and it does not move a good folder to `3.Convert`. The starter is `mediapipeline-detect.timer`, every 5 minutes. See [trigger.md](/workspace/artifacts/MediaPipeLine/notes/trigger.md).
 
+Line shapes for the conf, the mag card, and the log are [SYNTAX.md](../SYNTAX.md).
+
 Paths, the settle time, the lock, the card suffix, and both extension lists are read from `/etc/mediapipeline/pipe.conf`. The script does not hard-code them. The shipped copy is `pipe.conf` in this tree. `install.sh` copies it to `/etc/mediapipeline/pipe.conf` only when that file is missing, and always refreshes `/etc/mediapipeline/pipe.conf.default`.
 
 An extension matches the way the old `transcode.py` matched. That script kept one tuple:

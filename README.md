@@ -9,6 +9,7 @@ MediaPipeLine/
   install.sh     copies this tree into the system locations
   pipe.conf      shipped defaults for paths, tunables, and extensions
   camera-rules.conf  where a camera writes its gamma word. Version 1.
+  SYNTAX.md      the line shapes the conf, the card, and the log share
   bin/           scripts. Installed to /usr/local/bin
   systemd/       units and timers. Installed to /etc/systemd/system
   notes/         the script plan and the probe notes
