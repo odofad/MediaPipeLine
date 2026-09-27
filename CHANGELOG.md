@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — Sony MXF gamma label
+
+FS5 and FS7 store `CaptureGammaEquation` as a SMPTE label. Detection asks ExifTool for that one tag with `-u -fast` when the Sony XML grep misses. The label read on both bodies is written as `rec709`. `gamma.rec709` is `rec709-as-is`. Gamut is still empty on those files, so the shoot stays in Error until a gamut word exists.
+
 ## 2026-09-27 — mediainfo filter
 
 The first MediaInfo reports kept file-size lines and dropped `Other #1`, which is where an MXF puts acquisition metadata. Camscan now keeps every `Other` block and drops the size lines.

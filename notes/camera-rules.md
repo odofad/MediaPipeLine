@@ -26,6 +26,8 @@ The Panasonic rule may open a same-name sidecar only when it already matched and
 
 The Sony attribute order is `name-value`. That is the FX6 shape. `either` is in the grammar so a later body can use it. No rule uses it yet.
 
+An FS5 or FS7 MXF does not carry that XML line. The same tag is a SMPTE label in the header. `mediapipeline-detect` reads it with ExifTool `-u -fast -CaptureGammaEquation` when the XML grep missed. The label read on both bodies, `060e2b34.0401.0101.04010101.01020000`, is written as `rec709`. A label that is not that value is copied as ExifTool printed it.
+
 ## Not in the file
 
-FS5, FS7, SmallSony, phone, DJI, and Insta360 are not rules. No file from those shoots has been opened. The A7 word `rec709` was read by the `sony` rule. What the encoder does with `rec709` is a `pipe.conf` line, not a camera rule.
+SmallSony, phone, DJI, and Insta360 are not rules. No gamma word has been read from those files. The model `FDR-AX53` and the model `iPhone 17 Pro Max` are in their files, and neither stores a gamma word. The A7 word `rec709` and the FS5/FS7 label above are the same card word. What the encoder does with `rec709` is `gamma.rec709` in `pipe.conf`.

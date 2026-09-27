@@ -189,6 +189,34 @@ grep_sony() {
   grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manufacturer|Model|ModelName|CameraModelName)" value="[^"]+"' "$1" 2>/dev/null || true
 }
 
+# MXF stores CaptureGammaEquation as a 16-byte SMPTE label, not as XML text.
+# ExifTool prints the label and hides it unless -u is set. -fast stays in the header.
+# The label below was read on an FS5 and an FS7. RDD 18 names it ITU-R BT.709.
+# The Sony XML spelling of that curve is rec709. Other labels are not translated.
+sony_label_word() {
+  local raw="$1" norm
+  raw="$(trim "$raw")"
+  [[ -z "$raw" || "$raw" == -* ]] && return 0
+  norm="${raw//[[:space:].:-]/}"
+  norm="${norm,,}"
+  case "$norm" in
+    060e2b34040101010401010101020000) printf '%s' rec709 ;;
+    *) printf '%s' "$raw" ;;
+  esac
+}
+
+read_sony_label() {
+  local file="$1" raw
+  sony_gamma=""
+  command -v "$exiftool" >/dev/null 2>&1 || return 0
+  if command -v timeout >/dev/null 2>&1; then
+    raw="$(timeout --signal=TERM 25 "$exiftool" -u -fast -m -s3 -CaptureGammaEquation "$file" 2>/dev/null || true)"
+  else
+    raw="$("$exiftool" -u -fast -m -s3 -CaptureGammaEquation "$file" 2>/dev/null || true)"
+  fi
+  sony_gamma="$(sony_label_word "$raw")"
+}
+
 find_sidecar() {
   local file="$1" shoot="$2"
   local stem stemlower place cand base lower ext
@@ -365,7 +393,13 @@ probe_other_media() {
       gamma=$sony_gamma
       gamut=$sony_gamut
     else
-      classify_other "$file"
+      read_sony_label "$file"
+      if [[ -n "$sony_gamma" ]]; then
+        camera="Sony"
+        gamma=$sony_gamma
+      else
+        classify_other "$file"
+      fi
     fi
   else
     classify_other "$file"

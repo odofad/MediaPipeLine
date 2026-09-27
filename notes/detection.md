@@ -69,8 +69,9 @@ grep -a -o -E 'Item name="(CaptureGammaEquation|CaptureColorPrimaries|Make|Manuf
 ```
 
 A Sony make is `CaptureGammaEquation` present, or a make/model string `ILME-…`, `PXW-…`, or `Sony`. The word `Sony` is only accepted as the make, not as a hit anywhere in the file.
-5. **ExifTool**, only when both greps found no camera. The binary is `exiftool` from the conf. Ask for `Make` and `Model` only. A matching make sets the camera. Gamma stays `unknown`. Do not ask ExifTool for `GammaEquation`, `ColorSpace`, or any colour tag.
-6. **`other`.** No camera match. Gamma and gamut are `unknown`. The folder goes to `2.3.Error` with the card.
+5. **Sony MXF label**, only when that grep found no Sony item. The binary is `exiftool` from the conf. The command is `exiftool -u -fast -m -s3 -CaptureGammaEquation` on the real file, stopped after 25 seconds when `timeout` exists. `-u` is required. Without it, ExifTool hides this tag. `-fast` stays in the header. The label `060e2b34.0401.0101.04010101.01020000` is written as `rec709`. Any other value is copied as printed. Gamut is left empty. This is still camera `Sony`.
+6. **ExifTool make**, only when the label is also missing. Ask for `Make` and `Model` only. A matching make sets the camera. Gamma stays `unknown`. Do not ask ExifTool for `ColorSpace` or any picture colour tag.
+7. **`other`.** No camera match. Gamma and gamut are `unknown`. The folder goes to `2.3.Error` with the card.
 
 `ffprobe` `color_transfer` is never read. A missing gamma is never written as Rec.709. The Panasonic value is the text inside the tag, including `HD`, `V-Log`, `V-LogL`, and `HLG`. The Sony and RED values are copied the same way.
 

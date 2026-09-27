@@ -11,6 +11,7 @@ The key is the exact card text, including capitals. `gamma.HD` matches a card li
 | `V-LogL` | Panasonic `CaptureGamma` on a GH-series body | `v-log` |
 | `HLG` | Panasonic `CaptureGamma` | `hlg` |
 | `s-log3-cine` | Sony `CaptureGammaEquation`, with `s-gamut3-cine` on the FX6 probe | `s-log3` |
+| `rec709` | Sony `CaptureGammaEquation`. XML text on the A7, and the MXF label `060e2b34.0401.0101.04010101.01020000` on the FS5 and FS7 | `rec709-as-is` |
 | `Log3G10` | RED Gamma Curve, with `REDWideGamutRGB` on the reference clip | `log3g10` |
 
 `rec709-as-is` means the picture is already HD. The encoder does not run a log conversion. The other treatments are names only. No filter or LUT is chosen for them yet.
