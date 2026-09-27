@@ -14,7 +14,7 @@ The cameras detection can already read are RED, Panasonic, and the Sony bodies t
 
 `mediapipeline-status` reports the logging pass and the encoder. The encoder is not installed.
 
-`mediapipeline-camscan` opens one file in a mag and writes a report. It does not move the folder and it does not write a card. A failed tool is recorded as `failed`, not as `none`. A file under 1 MB is skipped. That report is how an unknown camera gets a rule. A body that stores no gamma word and has no log picture is listed in `known-cameras.conf` instead. The FDR-AX53 is the first one. Its proxy is Rec. 709.
+`mediapipeline-camscan` opens one file in a mag and writes a report. It does not move the folder and it does not write a card. A failed tool is recorded as `failed`, not as `none`. A file under 1 MB is skipped. That report is how an unknown camera gets a rule. A body that stores no gamma word is listed in `known-cameras.conf` instead. `FDR-AX53` is `rec709`. `iPhone 17 Pro Max` is `HLG` and `BT.2020`.
 
 ## Where it is going
 

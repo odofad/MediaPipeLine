@@ -30,4 +30,6 @@ An FS5 or FS7 MXF does not carry that XML line. The same tag is a SMPTE label in
 
 ## Named, no gamma word
 
-The phone, the DJI, and the Insta360 are rules that only name the camera. `exif-apple` matches `Apple*` or `iPhone*` and writes `Apple`. `exif-dji` matches `DJI*` and writes `DJI`. `exif-insta360` matches `Insta360*` and writes `Insta360`. None of them reads a colour tag. Gamma and gamut stay empty, so the folder still goes to `2.3.Error`. They are not in `known-cameras.conf`, because each body can record more than one picture.
+The DJI and the Insta360 are rules that only name the camera. `exif-dji` matches `DJI*` and writes `DJI`. `exif-insta360` matches `Insta360*` and writes `Insta360`. Neither reads a colour tag. Gamma and gamut stay empty, so the folder still goes to `2.3.Error`. They are not in `known-cameras.conf`. `DJI FLIP` is an encoder string, not a model, and that body can record more than one picture. The Insta360 scan had no model string.
+
+`exif-apple` still only names the camera. `iPhone 17 Pro Max` is the exception in `known-cameras.conf`: that exact model is `HLG` and `BT.2020`. A gamma word already in the file is not replaced.

@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — iPhone 17 Pro Max in known cameras
+
+The error-folder scan had one exact model string: `iPhone 17 Pro Max`. That block is `HLG` / `BT.2020` / `Apple`. `gamut.BT.2020` is `bt2020`, a name with no LUT yet. `DJI FLIP` is an encoder string, not a model, and that body can shoot D-Log, so it is not a block. Sony Mem, the A7 XML, the Small Sony, and the Insta360 did not add a row. Sony Mem is shared. The A7 already has a gamma word. The other two had no model string.
+
 ## 2026-09-27 — folder scan walks mags
 
 A scan of a folder of mags reads one opened file in each mag, then the next mag. `colour-pairs` on that run is that one file. Point camscan at one mag to read every clip. The terminal prints each file it tries. `timeout` sends KILL if a tool ignores TERM.
