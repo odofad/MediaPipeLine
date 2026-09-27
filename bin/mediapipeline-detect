@@ -527,11 +527,12 @@ lookup_known_model() {
   return 1
 }
 
-# A listed model is the picture. CaptureGammaEquation does not override it.
-# An unlisted model leaves a real equation alone.
+# The house picture for this body. A gamma word already read from the file is kept.
+# The block fills the card only when that word is missing.
 use_known_model() {
   local model="$1"
   [[ -z "$model" ]] && return 1
+  [[ -n "$gamma" ]] && return 1
   lookup_known_model "$model" || return 1
   camera=$known_hit_camera
   gamma=$known_hit_gamma

@@ -2,6 +2,10 @@
 
 Newest first.
 
+## 2026-09-27 — house picture is a fallback
+
+This house does not change the format on a camera, so `known-cameras.conf` may list a body that could shoot another picture. A gamma word already read from the file is kept. The block fills the card only when that word is missing. A proxy that misses a log conversion is acceptable. The original is the archive. `ILCE-7RM3` is still not listed. The opened clip says `s-log3-cine` and another report said `rec709`.
+
 ## 2026-09-27 — FS5 public primaries
 
 The opened FS5 picture descriptor has a public primaries label as well as the transfer label. Detection already wrote the transfer label as `rec709` and left the gamut empty, so the shoot stayed in Error. It now reads `ColorPrimaries` with `-b` only after that gamma word is set. The bytes `060e2b34040101060401010103030000` are written as `rec709`. Any other bytes stay empty. `ColorimetryCode` and the private acquisition labels are not read. MediaTrace is not a reader. This was checked on the opened FS5, not on an FS7 mag.

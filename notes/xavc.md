@@ -20,7 +20,7 @@ The XML on `C0001.MP4`, `C0002.MP4`, and `C0003.MP4` is:
 
 Picture and audio on the three MP4s: `h264`, and `pcm_s16be` stereo. The short `AVCHD/BDMV/STREAM/00000.MTS` is a different recording: `h264`, AC-3 5.1, and no model string anywhere in the file. Known cameras cannot name that file.
 
-`FDR-AX53` is a block in `known-cameras.conf`: `rec709` and `rec709`. Detection reads `modelName` from the `Device` tag and uses that block. It does not need ExifTool for this. A listed model replaces a `CaptureGammaEquation` on the same clip. An unlisted model does not. Both real AX53 clips card as `Sony` / `rec709` / `rec709` and stay in `2.Logged` once the file name starts with a date. A folder that only contains `PRIVATE/` is not walked. The pass logs `no-media` and leaves it.
+`FDR-AX53` is a block in `known-cameras.conf`: `rec709` and `rec709`. Detection reads `modelName` from the `Device` tag and uses that block only because the clip has no gamma word. A word already in the file is kept. Both real AX53 clips card as `Sony` / `rec709` / `rec709` and stay in `2.Logged` once the file name starts with a date. A folder that only contains `PRIVATE/` is not walked. The pass logs `no-media` and leaves it.
 
 ## XAVC-S, ILCE-7RM3
 
